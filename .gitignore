@@ -1,0 +1,8 @@
+__pycache__/
+*.zip
+*.pdf
+*.xlsx
+invoices_input/
+pdf_texts/
+debug_*.txt
+verify_app_logic.py

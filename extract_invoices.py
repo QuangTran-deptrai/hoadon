@@ -579,6 +579,11 @@ def extract_invoice_data(pdf_source, filename=None):
         "Đơn vị bán": "",
         "Phân loại": "",
         "Số tiền trước Thuế": "",
+        "Thuế 0%": "",
+        "Thuế 5%": "",
+        "Thuế 8%": "",
+        "Thuế 10%": "",
+        "Thuế khác": "",
         "Tiền thuế": "",
         "Số tiền sau": "",
         "Link lấy hóa đơn": "",
@@ -908,16 +913,87 @@ def extract_invoice_data(pdf_source, filename=None):
                 data["Tiền thuế"] = matches[-1]
                 break
         
+        # VAT RATE BREAKDOWN (detect amounts by specific tax rates)
+        # Format 1 - Sapo: "Thuế suất 8% : 995,000 79,600 1,074,600" where 2nd number is tax
+        # Format 2 - M-Invoice: "Tổng tiền chịu thuế suất: 8% 655.000 52.400 707.400" where 2nd number after % is tax
+        # Format 3 - Simple: "Tổng tiền thuế GTGT 8%: 17.592,59"
+        
+        # Multi-column patterns (Sapo, M-Invoice, MISA): X% before_tax tax_amount total
+        # NOTE: Use [^:\n]* instead of [^:]* to prevent matching across newlines
+        multi_col_patterns = [
+            # Sapo/MISA format: "Thuế suất 8%(VAT rate 8%): before tax total" - allow text after %
+            (r'Thuế suất\s*0\s*%[^:\n]*[:\s]+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 0%", 2),
+            (r'Thuế suất\s*5\s*%[^:\n]*[:\s]+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 5%", 2),
+            (r'Thuế suất\s*8\s*%[^:\n]*[:\s]+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 8%", 2),
+            (r'Thuế suất\s*10\s*%[^:\n]*[:\s]+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 10%", 2),
+            # Golden Gate 5-column format: "thuế suất khác... 8% before discount after_disc TAX total"
+            (r'Thuế suất\s*khác[^0-9\n]*8\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 8%", 4),
+            (r'Thuế suất\s*khác[^0-9\n]*10\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 10%", 4),
+            (r'Thuế suất\s*khác[^0-9\n]*5\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 5%", 4),
+            # M-Invoice format: "Tổng tiền chịu thuế suất... 8% before tax total"
+            (r'Tổng tiền chịu thuế suất[^:\n]*:\s*0\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 0%", 2),
+            (r'Tổng tiền chịu thuế suất[^:\n]*:\s*5\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 5%", 2),
+            (r'Tổng tiền chịu thuế suất[^:\n]*:\s*8\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 8%", 2),
+            (r'Tổng tiền chịu thuế suất[^:\n]*:\s*10\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 10%", 2),
+        ]
+        for pattern, column, group_idx in multi_col_patterns:
+            matches = list(re.finditer(pattern, full_text, re.IGNORECASE))
+            if matches:
+                data[column] = matches[-1].group(group_idx)
+        
+        # Single-value patterns (try if multi-column didn't find anything)
+        if not any(data[c] for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác"]):
+            simple_patterns = [
+                # "Tổng tiền thuế GTGT 8%: 17.592,59" format
+                (r'Tổng tiền thuế GTGT\s*0\s*%\s*[:\s]*(\d[\d\.,]*)', "Thuế 0%"),
+                (r'Tổng tiền thuế GTGT\s*5\s*%\s*[:\s]*(\d[\d\.,]*)', "Thuế 5%"),
+                (r'Tổng tiền thuế GTGT\s*8\s*%\s*[:\s]*(\d[\d\.,]*)', "Thuế 8%"),
+                (r'Tổng tiền thuế GTGT\s*10\s*%\s*[:\s]*(\d[\d\.,]*)', "Thuế 10%"),
+                # "Thuế GTGT (8%): amount" format
+                (r'(?:thuế gtgt|VAT)\s*[\(\[]?\s*0\s*%\s*[\)\]]?\s*[:\s]*(\d[\d\.,]*)', "Thuế 0%"),
+                (r'(?:thuế gtgt|VAT)\s*[\(\[]?\s*5\s*%\s*[\)\]]?\s*[:\s]*(\d[\d\.,]*)', "Thuế 5%"),
+                (r'(?:thuế gtgt|VAT)\s*[\(\[]?\s*8\s*%\s*[\)\]]?\s*[:\s]*(\d[\d\.,]*)', "Thuế 8%"),
+                (r'(?:thuế gtgt|VAT)\s*[\(\[]?\s*10\s*%\s*[\)\]]?\s*[:\s]*(\d[\d\.,]*)', "Thuế 10%"),
+                # "Tiền thuế GTGT ( 8% ) amount" format (OCR typo)
+                (r'Tiền thu[êế] GTGT\s*\(\s*0\s*%\s*\)\s*(\d[\d\.,]*)', "Thuế 0%"),
+                (r'Tiền thu[êế] GTGT\s*\(\s*5\s*%\s*\)\s*(\d[\d\.,]*)', "Thuế 5%"),
+                (r'Tiền thu[êế] GTGT\s*\(\s*8\s*%\s*\)\s*(\d[\d\.,]*)', "Thuế 8%"),
+                (r'Tiền thu[êế] GTGT\s*\(\s*10\s*%\s*\)\s*(\d[\d\.,]*)', "Thuế 10%"),
+            ]
+            for pattern, column in simple_patterns:
+                matches = re.findall(pattern, full_text, re.IGNORECASE)
+                if matches:
+                    data[column] = matches[-1]
+        
+        # If we found total tax but no breakdown, calculate rate from amounts
+        if data["Tiền thuế"] and not any(data[c] for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%"]):
+            total_tax = parse_money(data["Tiền thuế"])
+            before_tax = parse_money(data["Số tiền trước Thuế"])
+            if total_tax and before_tax and before_tax > 0:
+                rate = round(total_tax / before_tax * 100)
+                if rate == 0:
+                    data["Thuế 0%"] = data["Tiền thuế"]
+                elif rate == 5:
+                    data["Thuế 5%"] = data["Tiền thuế"]
+                elif rate == 8:
+                    data["Thuế 8%"] = data["Tiền thuế"]
+                elif rate == 10:
+                    data["Thuế 10%"] = data["Tiền thuế"]
+                else:
+                    data["Thuế khác"] = data["Tiền thuế"]
+        
         # After tax (total payment)
         after_tax_patterns = [
-            r'Tổng tiền chịu thuế suất.*[:\s]*[\d\.,]*%\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)', # M-INVOICE table summary (Total amount): 8% 655.000 52.400 707.400
+            # Golden Gate 5-column FIRST (most specific): 5 numbers separated by spaces
+            r'Tổng cộng tiền thanh toán\s*\(Total amount\)\s*([\d\.,\s]+)', # Golden Gate: 5 numbers, take the last one
+            # 3-column patterns
             r'Tổng cộng\s*\(Total amount\)\s*[:]\s*([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)', # File 2025_812...
             r'Tổng\s*cộng\s*\([Tt]otal\)?[:\s]*([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)', # MISA: Tổng cộng(Total): 375.000 30.000 405.000
             r'Tổngcộng[:\s]*([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)', # No-space: Tổngcộng: 2.816.100 256.158 3.072.258
             r'Tổng cộng\s*[:]\s*([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)', # SAPO/EasyInvoice: Tổng cộng: [Before] [VAT] [Total]
-            r'Tổng cộng tiền thanh toán\s*\(Total amount\)\s*([\d\.,\s]+)', # Golden Gate: 5 numbers, take the last one
+            r'Tổng tiền chịu thuế suất.*[:\s]*[\d\.,]*%\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)', # M-INVOICE table summary
             r'[Tt]ổng\s*tiền\s*thanh\s*toán\s*\([^)]+\)[:\s]*([\d\.,]+)',  # MISA: Tổng tiền thanh toán (Total amount): 1.800.000
-            r'[IT].{1,3}ng\s*số\s*ti[êề]n\s*thanh\s*toán[:\s]*([\d\.,]+)', # OCR typo: Iông, tiên (Petrolimex) - Flexible match for Tổng/Iông
+            r'[IT].{1,3}ng\s*số\s*ti[êề]n\s*thanh\s*toán[:\s]*([\d\.,]+)', # OCR typo: Iông, tiên (Petrolimex)
             r'Cộng tiền hàng hóa, dịch vụ[:\s]*[\d\.,]+\s+[\d\.,]+\s+([\d\.,]+)', # File 1226-TK-200k (Total on next line)
             r'[Tt]ổng\s*cộng\s*tiền\s*thanh\s*toán[^:]*[:\s]*([\d\.,]+)',
             r'[Tt]otal\s*payment[^:]*[:\s]*([\d\.,]+)',
@@ -947,11 +1023,17 @@ def extract_invoice_data(pdf_source, filename=None):
                     val = match.group(1)
                     # Use helper split if it looks like multiple numbers (Golden Gate)
                     parts = val.strip().split()
-                    if len(parts) >= 3 and all(c in '0123456789.,' for c in ''.join(parts)):
-                         # Golden Gate: Total amount 1.656.000 100.000 1.556.000 124.480 1.680.480
+                    if len(parts) >= 5 and all(c in '0123456789.,' for c in ''.join(parts)):
+                         # Golden Gate 5-column: before discount after_disc TAX total
+                         # 1.656.000 100.000 1.556.000 124.480 1.680.480
+                         data["Số tiền sau"] = parts[-1]      # 1.680.480
+                         data["Tiền thuế"] = parts[-2]        # 124.480
+                         data["Số tiền trước Thuế"] = parts[0] # 1.656.000 (NOT parts[-3])
+                    elif len(parts) >= 3 and all(c in '0123456789.,' for c in ''.join(parts)):
+                         # 3-column: before TAX total
                          data["Số tiền sau"] = parts[-1]
                          data["Tiền thuế"] = parts[-2]
-                         data["Số tiền trước Thuế"] = parts[-3]
+                         data["Số tiền trước Thuế"] = parts[0]
                     else:
                          data["Số tiền sau"] = val
                 break
@@ -1047,14 +1129,14 @@ def format_excel_output(file_path):
         border_style = Side(style='thin', color="000000")
         border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
         
-        # Column widths for simplified layout:
+        # Column widths for layout with VAT breakdown:
         # A=Tên file, B=Ngày, C=Số HĐ, D=Đơn vị bán, E=Phân loại
-        # F=Trước thuế, G=Thuế, H=Sau thuế, I=Link
-        # J=Mã tra cứu, K=MST, L=Mã CQT, M=Ký hiệu
+        # F=Trước thuế, G=Thuế 0%, H=Thuế 5%, I=Thuế 8%, J=Thuế 10%, K=Thuế khác
+        # L=Tiền thuế, M=Sau thuế, N=Link, O=Mã tra cứu, P=MST, Q=Mã CQT, R=Ký hiệu
         widths = {
             'A': 30, 'B': 12, 'C': 15, 'D': 40, 'E': 18,
-            'F': 18, 'G': 15, 'H': 18, 'I': 15,
-            'J': 20, 'K': 15, 'L': 15, 'M': 12
+            'F': 18, 'G': 12, 'H': 12, 'I': 12, 'J': 12, 'K': 12,
+            'L': 15, 'M': 18, 'N': 15, 'O': 20, 'P': 15, 'Q': 15, 'R': 12
         }
         
         for col_letter, width in widths.items():
@@ -1076,8 +1158,8 @@ def format_excel_output(file_path):
         # No need for merge logic since each invoice is now one row
         
         # Format Data Rows - borders and number formatting
-        money_cols_idx = [6, 7, 8]  # F, G, H (Trước thuế, Thuế, Sau thuế)
-        center_cols_idx = [2, 3, 5, 11, 13]  # B, C, E, K, M
+        money_cols_idx = [6, 7, 8, 9, 10, 11, 12, 13]  # F through M (all money columns)
+        center_cols_idx = [2, 3, 5, 16, 18]  # B, C, E, P, R
         
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
             for cell in row:
@@ -1161,20 +1243,32 @@ def main():
     # Reorder columns
     columns = [
         "Tên file", "Ngày hóa đơn", "Số hóa đơn", "Đơn vị bán", "Phân loại",
-        "Số tiền trước Thuế", "Tiền thuế", "Số tiền sau", "Link lấy hóa đơn",
+        "Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác",
+        "Tiền thuế", "Số tiền sau", "Link lấy hóa đơn",
         "Mã tra cứu", "Mã số thuế", "Mã CQT", "Ký hiệu"
     ]
     df = df[columns]
     
     # Format money columns - convert to number and add comma separators
-    money_columns = ["Số tiền trước Thuế", "Tiền thuế", "Số tiền sau"]
+    money_columns = ["Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác", "Tiền thuế", "Số tiền sau"]
     for col in money_columns:
         def convert_to_number(x):
             if pd.isna(x) or x == '':
                 return None
-            x_str = str(x).replace('.', '').replace(',', '')
+            x_str = str(x).strip()
+            # Detect format: 
+            # - Vietnamese decimal: 17.592,59 (comma before 2 digits at end)
+            # - Thousands only: 79,600 (comma before 3 digits at end)
+            import re
+            # If comma followed by exactly 2 digits at end, it's decimal
+            if re.search(r',\d{2}$', x_str):
+                # Vietnamese format: . = thousands, , = decimal
+                x_str = x_str.replace('.', '').replace(',', '.')
+            else:
+                # Comma is thousands separator, just remove both . and ,
+                x_str = x_str.replace('.', '').replace(',', '')
             try:
-                return int(float(x_str))
+                return round(float(x_str))
             except (ValueError, TypeError):
                 return x
         df[col] = df[col].apply(convert_to_number)

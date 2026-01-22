@@ -44,10 +44,11 @@ if uploaded_files:
         # Create DataFrame
         df = pd.DataFrame(all_rows)
         
-        # Column order (simplified - no qty/price/amount)
+        # Column order with VAT breakdown
         columns = [
             "Tên file", "Ngày hóa đơn", "Số hóa đơn", "Đơn vị bán", "Phân loại",
-            "Số tiền trước Thuế", "Tiền thuế", "Số tiền sau", "Link lấy hóa đơn",
+            "Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác",
+            "Tiền thuế", "Số tiền sau", "Link lấy hóa đơn",
             "Mã tra cứu", "Mã số thuế", "Mã CQT", "Ký hiệu"
         ]
         for col in columns:
@@ -57,14 +58,21 @@ if uploaded_files:
         df = df[columns]
         
         # Convert money columns to numbers
-        money_columns = ["Số tiền trước Thuế", "Tiền thuế", "Số tiền sau"]
+        money_columns = ["Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác", "Tiền thuế", "Số tiền sau"]
         for col in money_columns:
             def convert_to_number(x):
                 if pd.isna(x) or x == '':
                     return None
-                x_str = str(x).replace('.', '').replace(',', '')
+                x_str = str(x).strip()
+                import re
+                # If comma followed by exactly 2 digits at end, it's decimal (Vietnamese: 17.592,59)
+                if re.search(r',\d{2}$', x_str):
+                    x_str = x_str.replace('.', '').replace(',', '.')
+                else:
+                    # Comma is thousands separator (79,600), just remove both
+                    x_str = x_str.replace('.', '').replace(',', '')
                 try:
-                    return int(float(x_str))
+                    return round(float(x_str))
                 except (ValueError, TypeError):
                     return x
             df[col] = df[col].apply(convert_to_number)
@@ -86,11 +94,11 @@ if uploaded_files:
             border_style = Side(style='thin', color="000000")
             border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
             
-            # Column widths for simplified layout
+            # Column widths for layout with VAT breakdown
             widths = {
                 'A': 30, 'B': 12, 'C': 15, 'D': 40, 'E': 18,
-                'F': 18, 'G': 15, 'H': 18, 'I': 15,
-                'J': 20, 'K': 15, 'L': 15, 'M': 12
+                'F': 18, 'G': 12, 'H': 12, 'I': 12, 'J': 12, 'K': 12,
+                'L': 15, 'M': 18, 'N': 15, 'O': 20, 'P': 15, 'Q': 15, 'R': 12
             }
             for col_letter, width in widths.items():
                 worksheet.column_dimensions[col_letter].width = width
@@ -109,8 +117,8 @@ if uploaded_files:
             worksheet.auto_filter.ref = worksheet.dimensions
             
             # Format Data Rows
-            money_cols_idx = [6, 7, 8]  # F, G, H
-            center_cols_idx = [2, 3, 5, 11, 13]  # B, C, E, K, M
+            money_cols_idx = [6, 7, 8, 9, 10, 11, 12, 13]  # F through M
+            center_cols_idx = [2, 3, 5, 16, 18]  # B, C, E, P, R
             
             for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
                 for cell in row:

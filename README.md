@@ -40,3 +40,28 @@ Công cụ trích xuất dữ liệu hóa đơn PDF tự động, được xây 
    - Nhấn **"Deploy"**.
 
 Sau khoảng 1-2 phút, bạn sẽ nhận được một đường link (ví dụ: `https://invoice-extractor.streamlit.app`) để chia sẻ cho mọi người sử dụng.
+
+## 🔄 Cách cập nhật Code
+
+Khi bạn muốn sửa code hoặc thêm tính năng:
+
+1. Sửa code trên máy tính của bạn (Local).
+2. Chạy thử `streamlit run app.py` để đảm bảo code chạy đúng.
+3. **Chạy các lệnh Git để đẩy code mới lên:**
+   ```bash
+   git add .
+   git commit -m "Mô tả thay đổi mới"
+   git push
+   ```
+
+**Streamlit Cloud sẽ tự động phát hiện thay đổi và cập nhật ứng dụng của bạn trong vòng vài phút. Bạn KHÔNG cần phải xóa app cũ hay deploy lại từ đầu.**
+
+## 🌐 Tùy chỉnh đường dẫn (URL)
+
+Mặc định Streamlit sẽ tạo link ngẫu nhiên. Để sửa thành link đẹp hơn (ví dụ: `hoadon-congty.streamlit.app`):
+
+1. Vào dashboard **Streamlit Cloud**.
+2. Nhấn vào dấu **3 chấm (⋮)** bên cạnh ứng dụng của bạn -> Chọn **Settings**.
+3. Tại mục **General**, tìm phần **Custom subdomain**.
+4. Nhập tên bạn muốn và lưu lại.
+

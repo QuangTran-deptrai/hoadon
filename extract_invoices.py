@@ -631,11 +631,11 @@ def extract_invoice_data(pdf_source, filename=None):
                         print(f"  -> Error reading fallback file: {e}")
 
         if not full_text.strip():
-            print(f"  Could not extract text (scanned PDF?): {os.path.basename(pdf_path)}")
-            # Set all fields to "không nhận diện"
+            print(f"  Could not extract text (scanned PDF?): {filename}")
+            # Set all fields to "không nhận diện được"
             for key in data:
                 if key != "Tên file":
-                    data[key] = "không nhận diện"
+                    data[key] = "không nhận diện được"
             return data, []  # Return empty line_items
 
         

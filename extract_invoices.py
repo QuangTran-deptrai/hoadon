@@ -14,10 +14,10 @@ CATEGORY_KEYWORDS = {
         "gỏi", "xào", "nướng", "chiên", "hấp", "hầm", "quay", "cơm", "xôi", "soup",
         "trà", "cà phê", "nước", "coca", "matcha", "oolong", "trái cây", "bánh",
         "đậu", "trứng", "lươn", "hàu", "khô mực", "khăn lạnh", "hủ tiếu", "baba",
-        "bồ câu", "chả", "dừa", "khoáng", "suối", "sả"
+        "bồ câu", "chả", "dừa", "khoáng", "suối", "sả","Rượu"
     ],
     "Viễn thông": [
-        "cước", "di động", "thẻ cào", "sim", "điện thoại", "internet", "mạng", "mệnh giá"
+        "cước", "di động", "thẻ cào", "sim", "điện thoại", "internet", "mạng", "mệnh giá","THE CAO MENH GIA"
     ],
     "Dịch vụ IT": [
         "cài đặt", "máy tính", "sửa chữa", "bảo trì", "setup", "install", "văn phòng"
@@ -577,10 +577,7 @@ def extract_invoice_data(pdf_source, filename=None):
         "Ngày hóa đơn": "",
         "Số hóa đơn": "",
         "Đơn vị bán": "",
-        "Tên hàng hóa": "",
-        "Số lượng": "",
-        "Đơn giá": "",
-        "Thành tiền": "",
+        "Phân loại": "",
         "Số tiền trước Thuế": "",
         "Tiền thuế": "",
         "Số tiền sau": "",
@@ -1050,14 +1047,14 @@ def format_excel_output(file_path):
         border_style = Side(style='thin', color="000000")
         border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
         
-        # Column widths for new layout:
-        # A=Tên file, B=Ngày, C=Số HĐ, D=Đơn vị bán, E=Tên hàng hóa, F=SL, G=Đơn giá, H=Thành tiền
-        # I=Trước thuế, J=Thuế, K=Sau thuế, L=Link, M=Mã tra cứu, N=MST, O=Mã CQT, P=Ký hiệu
+        # Column widths for simplified layout:
+        # A=Tên file, B=Ngày, C=Số HĐ, D=Đơn vị bán, E=Phân loại
+        # F=Trước thuế, G=Thuế, H=Sau thuế, I=Link
+        # J=Mã tra cứu, K=MST, L=Mã CQT, M=Ký hiệu
         widths = {
-            'A': 30, 'B': 12, 'C': 15, 'D': 40,
-            'E': 50, 'F': 10, 'G': 15, 'H': 18,
-            'I': 18, 'J': 15, 'K': 18, 'L': 15,
-            'M': 20, 'N': 15, 'O': 15, 'P': 12
+            'A': 30, 'B': 12, 'C': 15, 'D': 40, 'E': 18,
+            'F': 18, 'G': 15, 'H': 18, 'I': 15,
+            'J': 20, 'K': 15, 'L': 15, 'M': 12
         }
         
         for col_letter, width in widths.items():
@@ -1076,48 +1073,11 @@ def format_excel_output(file_path):
         # Add Filter
         ws.auto_filter.ref = ws.dimensions
         
-        # Columns to merge (invoice-level data - NOT line items E,F,G,H)
-        merge_cols = ['A', 'B', 'C', 'D', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
+        # No need for merge logic since each invoice is now one row
         
-        # Find invoice groups by "Tên file" (column A)
-        current_file = None
-        group_start = 2  # Data starts at row 2
-        
-        for row_idx in range(2, ws.max_row + 2):  # +2 to process last group
-            if row_idx <= ws.max_row:
-                file_name = ws.cell(row=row_idx, column=1).value
-            else:
-                file_name = None  # Force end of last group
-            
-            if file_name != current_file and current_file is not None:
-                # End of group - merge cells from group_start to row_idx-1
-                group_end = row_idx - 1
-                if group_end > group_start:  # Only merge if more than 1 row
-                    for col_letter in merge_cols:
-                        col_idx = ord(col_letter) - ord('A') + 1
-                        
-                        # Clear values in cells to be merged (except first) BEFORE merging
-                        for r in range(group_start + 1, group_end + 1):
-                            ws.cell(row=r, column=col_idx).value = None
-                        
-                        # Now merge cells
-                        merge_range = f"{col_letter}{group_start}:{col_letter}{group_end}"
-                        try:
-                            ws.merge_cells(merge_range)
-                        except:
-                            pass  # Already merged or error
-                        
-                        # Set alignment on first cell
-                        first_cell = ws.cell(row=group_start, column=col_idx)
-                        first_cell.alignment = Alignment(vertical="center", horizontal="center" if col_letter in ['B', 'C', 'N', 'P'] else "left", wrap_text=True)
-                
-                group_start = row_idx
-            
-            current_file = file_name
-
         # Format Data Rows - borders and number formatting
-        money_cols_idx = [7, 8, 9, 10, 11]  # G, H, I, J, K (Đơn giá, Thành tiền, Trước thuế, Thuế, Sau thuế)
-        center_cols_idx = [2, 3, 6, 14, 16]  # B, C, F, N, P
+        money_cols_idx = [6, 7, 8]  # F, G, H (Trước thuế, Thuế, Sau thuế)
+        center_cols_idx = [2, 3, 5, 11, 13]  # B, C, E, K, M
         
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
             for cell in row:
@@ -1181,38 +1141,33 @@ def main():
         
         data, line_items = extract_invoice_data(pdf_path)
         
-        # Expand invoice into multiple rows (one per line item)
+        # Classify invoice based on line items
         if line_items:
-            for item in line_items:
-                row = data.copy()
-                row["Tên hàng hóa"] = item.get("name", "")
-                row["Số lượng"] = item.get("qty", "")
-                row["Đơn giá"] = item.get("unit_price", "")
-                row["Thành tiền"] = item.get("amount", "")
-                all_rows.append(row)
+            all_item_names = " ".join([item.get("name", "") for item in line_items])
+            data["Phân loại"] = classify_content(all_item_names)
         else:
-            # No line items - add single row with empty item columns
-            all_rows.append(data)
+            data["Phân loại"] = "Khác"
+        
+        all_rows.append(data)
         
         # Show status
         item_count = len(line_items) if line_items else 0
         seller_display = data['Đơn vị bán'][:30] if data['Đơn vị bán'] and len(data['Đơn vị bán']) > 0 else 'N/A'
-        print(f"  -> Ngay: {data['Ngày hóa đơn']}, So: {data['Số hóa đơn']}, Items: {item_count}, DonViBan: {seller_display}...")
+        print(f"  -> Ngay: {data['Ngày hóa đơn']}, So: {data['Số hóa đơn']}, Category: {data['Phân loại']}, DonViBan: {seller_display}...")
     
     # Create DataFrame
     df = pd.DataFrame(all_rows)
     
     # Reorder columns
     columns = [
-        "Tên file", "Ngày hóa đơn", "Số hóa đơn", "Đơn vị bán", 
-        "Tên hàng hóa", "Số lượng", "Đơn giá", "Thành tiền",
+        "Tên file", "Ngày hóa đơn", "Số hóa đơn", "Đơn vị bán", "Phân loại",
         "Số tiền trước Thuế", "Tiền thuế", "Số tiền sau", "Link lấy hóa đơn",
         "Mã tra cứu", "Mã số thuế", "Mã CQT", "Ký hiệu"
     ]
     df = df[columns]
     
     # Format money columns - convert to number and add comma separators
-    money_columns = ["Số tiền trước Thuế", "Tiền thuế", "Số tiền sau", "Đơn giá", "Thành tiền"]
+    money_columns = ["Số tiền trước Thuế", "Tiền thuế", "Số tiền sau"]
     for col in money_columns:
         def convert_to_number(x):
             if pd.isna(x) or x == '':
@@ -1239,7 +1194,7 @@ def main():
     print(f"SUMMARY:")
     unique_files = df["Tên file"].nunique()
     print(f"  Total rows: {len(df)} (from {unique_files} invoices)")
-    for col in ["Ngày hóa đơn", "Số hóa đơn", "Đơn vị bán", "Tên hàng hóa", "Số tiền sau"]:
+    for col in ["Ngày hóa đơn", "Số hóa đơn", "Đơn vị bán", "Phân loại", "Số tiền sau"]:
         empty_count = (df[col] == '').sum() + df[col].isna().sum()
         pct = (1 - empty_count/len(df)) * 100
         print(f"  {col}: {pct:.0f}% filled ({len(df)-empty_count}/{len(df)})")

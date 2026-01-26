@@ -1,67 +1,73 @@
-# 🧾 Invoice Extraction Web App
+# 🧾 Invoice Extraction App
 
-Công cụ trích xuất dữ liệu hóa đơn PDF tự động, được xây dựng bằng Python và Streamlit.
+Ứng dụng trích xuất, phân loại và tổng hợp dữ liệu hóa đơn (Invoice) từ file PDF, hỗ trợ xuất báo cáo Excel cho kế toán.
+Được xây dựng bằng **Python (Streamlit)** và tối ưu hóa cho việc triển khai Self-Hosted (Server riêng).
+
+## ✨ Tính năng chính
+*   **Trích xuất thông tin:** Tự động đọc Số hóa đơn, Ngày, MST Bán/Mua, Tiền trước thuế, Thuế, Tổng tiền...
+*   **Phân loại tự động:** Nhận diện loại chi phí (Ăn uống, Viễn thông, Tiếp khách...) dựa trên từ khóa.
+*   **Xử lý hàng loạt:** Upload nhiều file PDF cùng lúc.
+*   **Xuất báo cáo:** Tải về file Excel tổng hợp đầy đủ thông tin.
 
 ## 📂 Cấu trúc dự án
-- `app.py`: Giao diện web chính.
-- `extract_invoices.py`: Logic xử lý và trích xuất dữ liệu từ PDF.
-- `requirements.txt`: Các thư viện cần thiết.
+*   `app.py`: Giao diện chính (Streamlit).
+*   `extract_invoices.py`: Core logic xử lý PDF và trích xuất dữ liệu.
+*   `Dockerfile` & `docker-compose.yml`: Cấu hình deployment (Docker).
+*   `requirements.txt`: Danh sách thư viện Python.
+*   `deployment_guide.md`: Hướng dẫn chi tiết cho IT triển khai Server.
 
-## 🚀 Cách chạy trên máy cá nhân (Local)
+---
 
-1. **Cài đặt Python** (nếu chưa có).
-2. **Cài đặt thư viện:**
-   Mở terminal (CMD/PowerShell) tại thư mục dự án và chạy:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. **Chạy ứng dụng:**
-   ```bash
-   streamlit run app.py
-   ```
-   Ứng dụng sẽ tự động mở trên trình duyệt tại địa chỉ `http://localhost:8501`.
+## � Cài đặt & Chạy (Môi trường Dev/Local)
 
-## ☁️ Cách Deploy lên Streamlit Community Cloud (Miễn phí)
+Dành cho Developer hoặc chạy thử trên máy cá nhân Windows/Mac.
 
-Để người khác có thể sử dụng qua mạng, bạn có thể đưa ứng dụng lên cloud miễn phí của Streamlit:
+### Yêu cầu
+*   Python 3.9 trở lên (Khuyên dùng 3.11).
 
-1. **Đẩy code lên GitHub:**
-   - Tạo một repository mới trên GitHub (Public).
-   - Upload toàn bộ các file trong thư mục này lên repository đó.
+### Các bước
+1.  **Clone code** và mở terminal tại thư mục dự án.
+2.  **Cài đặt thư viện:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  **Chạy ứng dụng:**
+    ```bash
+    streamlit run app.py
+    ```
+    Truy cập tại: `http://localhost:8501`
 
-2. **Đăng nhập Streamlit Cloud:**
-   - Truy cập [share.streamlit.io](https://share.streamlit.io/).
-   - Đăng nhập bằng tài khoản GitHub.
+---
 
-3. **Deploy App:**
-   - Nhấn **"New app"**.
-   - Chọn repository bạn vừa tạo.
-   - **Main file path:** Điền `app.py`.
-   - Nhấn **"Deploy"**.
+## 🚀 Triển khai Server (Production)
 
-Sau khoảng 1-2 phút, bạn sẽ nhận được một đường link (ví dụ: `https://invoice-extractor.streamlit.app`) để chia sẻ cho mọi người sử dụng.
 
-## 🔄 Cách cập nhật Code
+**Phương pháp khuyến nghị:** Sử dụng **Docker**.
 
-Khi bạn muốn sửa code hoặc thêm tính năng:
+### Cách 1: Chạy bằng Docker Compose (Nhanh nhất)
+*Yêu cầu Server đã cài Docker & Docker Compose.*
 
-1. Sửa code trên máy tính của bạn (Local).
-2. Chạy thử `streamlit run app.py` để đảm bảo code chạy đúng.
-3. **Chạy các lệnh Git để đẩy code mới lên:**
-   ```bash
-   git add .
-   git commit -m "Mô tả thay đổi mới"
-   git push
-   ```
+1.  Copy toàn bộ source code lên Server.
+2.  Mở terminal/CMD tại thư mục code.
+3.  Chạy lệnh:
+    ```bash
+    docker-compose up -d --build
+    ```
+4.  App sẽ chạy ngầm tại Port **8501**.
+5.  (Tùy chọn) Cấu hình Nginx Reverse Proxy để trỏ domain `kiemtrahoadon.psd.com.vn` về port 8501.
 
-**Streamlit Cloud sẽ tự động phát hiện thay đổi và cập nhật ứng dụng của bạn trong vòng vài phút. Bạn KHÔNG cần phải xóa app cũ hay deploy lại từ đầu.**
+### Cách 2: Chạy Thủ công trên Windows Server
+*Nếu không dùng Docker.*
 
-## 🌐 Tùy chỉnh đường dẫn (URL)
+1.  Cài đặt **Python 3.11** 64-bit trên Windows Server.
+2.  Cài đặt thư viện: `pip install -r requirements.txt`.
+3.  Tạo script chạy nền hoặc dùng Task Scheduler để chạy lệnh:
+    ```bash
+    streamlit run app.py --server.port=8501
+    ```
 
-Mặc định Streamlit sẽ tạo link ngẫu nhiên. Để sửa thành link đẹp hơn (ví dụ: `hoadon-congty.streamlit.app`):
+---
 
-1. Vào dashboard **Streamlit Cloud**.
-2. Nhấn vào dấu **3 chấm (⋮)** bên cạnh ứng dụng của bạn -> Chọn **Settings**.
-3. Tại mục **General**, tìm phần **Custom subdomain**.
-4. Nhập tên bạn muốn và lưu lại.
-
+## 📝 Lưu ý quan trọng
+*   **Upload File Lớn:** Nếu dùng Nginx, cần cấu hình `client_max_body_size 100M;` để không bị lỗi khi upload PDF dung lượng cao.
+*   **Bảo mật:** Khuyến nghị setup HTTPS (SSL) nếu truy cập từ môi trường Internet công cộng.

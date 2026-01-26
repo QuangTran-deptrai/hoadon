@@ -6,3 +6,19 @@ invoices_input/
 pdf_texts/
 debug_*.txt
 verify_app_logic.py
+
+# Build artifacts
+dist/
+build/
+*.spec
+*.exe
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+
+# Ide
+.vscode/
+.idea/

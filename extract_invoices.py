@@ -37,14 +37,21 @@ CATEGORY_KEYWORDS = {
 }
 
 def classify_content(services_text):
-    """Classify services into categories using keyword matching."""
+    """Classify services into categories using keyword matching with word boundaries."""
     if not services_text:
         return "Khác"
     text_lower = services_text.lower()
     
     scores = {}
     for category, keywords in CATEGORY_KEYWORDS.items():
-        score = sum(1 for kw in keywords if kw.lower() in text_lower)
+        score = 0
+        for kw in keywords:
+            # Use regex word boundary to avoid partial matches (e.g. "thấp" matching "hấp", "lượng" matching "lươn")
+            # \b matches word boundary. Escape keyword to handle special chars.
+            pattern = r'\b' + re.escape(kw.lower()) + r'\b'
+            if re.search(pattern, text_lower):
+                score += 1
+        
         if score > 0:
             scores[category] = score
     

@@ -1,10 +1,10 @@
-
-import os
 import re
-import pandas as pd
+import os
 import pdfplumber
+import pandas as pd
 import openpyxl
-from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+import ast  # Added for parsing dict strings
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 # Category mapping based on extracted services
@@ -14,7 +14,7 @@ CATEGORY_KEYWORDS = {
         "gỏi", "xào", "nướng", "chiên", "hấp", "hầm", "quay", "cơm", "xôi", "soup",
         "trà", "cà phê", "nước", "coca", "matcha", "oolong", "trái cây", "bánh",
         "đậu", "trứng", "lươn", "hàu", "khô mực", "khăn lạnh", "hủ tiếu", "baba",
-        "bồ câu", "chả", "dừa", "khoáng", "suối", "sả","Rượu"
+        "bồ câu", "chả", "dừa", "khoáng", "suối", "sả","Rượu","DÊ QUAY LẠNG"
     ],
     "Viễn thông": [
         "cước", "di động", "thẻ cào", "sim", "điện thoại", "internet", "mạng", "mệnh giá","THE CAO MENH GIA"
@@ -611,6 +611,48 @@ def extract_invoice_data(pdf_source, filename=None):
                 if page_text:
                     full_text += page_text + "\n"
         
+        # Normalize newlines
+        full_text = full_text.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # CLEANUP: Remove garbage lines (e.g. debug JSON pointers like {'name': ...}) 
+        clean_lines = []
+        for line in full_text.split('\n'):
+            line_strip = line.strip()
+            
+            # AGGRESSIVE CLEANUP for PSD.pdf garbage: 0'}2,950,000'}'}
+            # FIRST: Check if this garbage contains a hidden number (Total)
+            if "2,950,000" in line:
+                 print(f"DEBUG_PSD_LINE: {repr(line)}")
+            
+            # Pattern: 0'}2,950,000'}'}
+            # Try looser pattern: 0'}...digits...'}'}
+            garbage_match = re.search(r"0'}([\d\.,]+)'\}'\}", line)
+            if garbage_match:
+                 val = garbage_match.group(1)
+                 print(f"DEBUG: Found hidden total in garbage: {val}")
+                 # Store it in data immediately
+                 if not data["Số tiền sau"]:
+                      data["Số tiền sau"] = val
+                 # If we found it, we can strip the garbage wrapper but keep the number?
+                 # Or just strip it all if we saved it?
+                 # Let's keep the number in text just in case regexes need it
+                 line = line.replace(garbage_match.group(0), " " + val + " ")
+
+            # Repeatedly remove the garbage tokens until gone
+            for _ in range(3):
+                line = line.replace("0'}", "").replace("'}'}", "").replace("'}", "").replace("{'", "")
+            
+            # Filter lines that appear to be purely programming code/garbage
+            # (Only filter if we failed to parse it as valid item above)
+            if line_strip.startswith('{') or (line_strip.startswith("'") and line_strip.endswith("'")):
+                 continue
+            
+            # Sanitization: Remove soft hyphens and null bytes
+            line = line.replace('\xad', '').replace('\x00', '')
+            clean_lines.append(line)
+        full_text = "\n".join(clean_lines)
+
+        
         # Fallback only works if we have a local file path
         if not full_text and isinstance(pdf_source, str):
             print(f"  Empty PDF text, checking for fallback text file...")
@@ -817,7 +859,8 @@ def extract_invoice_data(pdf_source, filename=None):
             r'Mã số bí mật[:\s]*([A-Za-z0-9_]+)',
             r'Security Code\)[:\s]*([A-Z0-9]+)',
             r'Mã tra cứu[:\s]*([A-Za-z0-9]+)',
-            r'[Ll]ookup\s*code[):\s]*([A-Za-z0-9]+)',  # Standalone
+            r'[Ll]ookup\s*code[):\s]*([A-Za-z0-9]+)',
+            r'Ma tra cuu[:\s]*([A-Za-z0-9]+)', # Non-accented
         ]
         for pattern in security_patterns:
             match = re.search(pattern, full_text, re.IGNORECASE)
@@ -831,6 +874,18 @@ def extract_invoice_data(pdf_source, filename=None):
                     # Very long code might be CQT, store separately
                     if not data["Mã CQT"]:
                         data["Mã CQT"] = code
+        
+        # Fallback for PSD.pdf where "Mã tra cứu" is not clearly labeled but looks like a long code
+        if not data["Mã tra cứu"]:
+             # Look for long string of mixed Upper/Digits in footer area (last 200 chars)
+             footer_text = full_text[-500:] 
+             # Common format: no label, just the code
+             potentials = re.findall(r'\b[A-F0-9]{8,}\b', footer_text)
+             for p in potentials:
+                 if len(p) >= 10 and not p.isdigit(): # Mix of chars, likely Lookup Code
+                     if "0100" not in p and "030" not in p: # Avoid tax codes
+                         data["Mã tra cứu"] = p
+                         break
         
         # TAX CODE (MST đơn vị bán) - Look for seller's tax code (first one)
         tax_patterns = [
@@ -971,7 +1026,26 @@ def extract_invoice_data(pdf_source, filename=None):
                 matches = re.findall(pattern, full_text, re.IGNORECASE)
                 if matches:
                     data[column] = matches[-1]
-        
+                matches = re.findall(pattern, full_text, re.IGNORECASE)
+                if matches:
+                    data[column] = matches[-1]
+                    
+        # Extra Fallback: "Tiền thuế" with simple label (often found in Footer)
+        if not data["Tiền thuế"]:
+            # Try finding just loose "Tiền thuế ...."
+            simple_tax = re.search(r'(?:Tiền thuế|Thuế GTGT|VAT)\s*[\(\d%]*\)?[:\s]*([0-9]+[.,][0-9]+)', full_text, re.IGNORECASE)
+            if simple_tax:
+                 data["Tiền thuế"] = simple_tax.group(1)
+            
+            # If still not found, try finding line with "10%" or "8%" and taking the number at the end
+            if not data["Tiền thuế"]:
+                 rate_lines = re.findall(r'(?:10%|8%)\s+([0-9][\d\.,]+)', full_text)
+                 if rate_lines:
+                     # Usually the last number on a "10%" line is the tax amount or total
+                     # This is risky but better than nothing for 0318...pdf
+                     pass
+
+
         # If we found total tax but no breakdown, calculate rate from amounts
         if data["Tiền thuế"] and not any(data[c] for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%"]):
             total_tax = parse_money(data["Tiền thuế"])
@@ -1095,8 +1169,21 @@ def extract_invoice_data(pdf_source, filename=None):
             if before is not None and vat is not None:
                 data["Số tiền sau"] = format_money(before + vat)
             elif before is not None and vat is None:
-                # No VAT, total = before tax
-                data["Số tiền sau"] = data["Số tiền trước Thuế"]
+                # No VAT found yet. BUT check if we have "Thuế khác" indicating a rate!
+                # If we have a rate (e.g. "10"), we should NOT assume Total = PreTax yet.
+                if data["Thuế khác"] and data["Thuế khác"].strip() in ["10", "5", "8"]:
+                     pass # Wait for calculation
+                
+                # If Thuế khác is same as Total or Tax, it's noise
+                if data["Thuế khác"]:
+                     val_num = parse_money(data["Thuế khác"])
+                     total_num = parse_money(data["Số tiền sau"])
+                     tax_num = parse_money(data["Tiền thuế"])
+                     if val_num and (val_num == total_num or val_num == tax_num):
+                          data["Thuế khác"] = ""
+                else:
+                    # No VAT, total = before tax
+                    data["Số tiền sau"] = data["Số tiền trước Thuế"]
         
         # REVERSE CASE: If we have Số tiền sau (total) but no Số tiền trước Thuế (before tax)
         # and no VAT was found, then this is a non-VAT invoice, so set pre-tax = post-tax
@@ -1108,16 +1195,228 @@ def extract_invoice_data(pdf_source, filename=None):
                 data["Số tiền trước Thuế"] = data["Số tiền sau"]
             elif after is not None and vat is not None:
                 # VAT exists, so calculate pre-tax = post-tax - VAT
+                # VAT exists, so calculate pre-tax = post-tax - VAT
                 data["Số tiền trước Thuế"] = format_money(after - vat)
+        
+        # SPECIAL FIX for PSD.pdf where total is hidden in garbage
+        # We recovered "2,950,000" from garbage but regex didn't catch it as Total.
+        # Check if we have a valid recovered amount in line items but no Invoice Total?
+        # Actually, let's look for the specific garbage string containing the Total
+        if not data["Số tiền sau"]:
+             garbage_total = re.search(r"0'}([\d\.,]+)'\}'\}", full_text)
+             if garbage_total:
+                 val = garbage_total.group(1)
+                 data["Số tiền sau"] = val
+                 # Use this as PreTax too if missing (or calc tax)
+                 if not data["Số tiền trước Thuế"]:
+                      data["Số tiền trước Thuế"] = val
+
+        # FALLBACK: If "Số tiền trước Thuế" or "Số tiền sau" is still missing, 
+        # try to sum up the Line Items!
+        if (not data["Số tiền trước Thuế"] or not data["Số tiền sau"]) and line_items:
+            print("  -> Calculating totals from line items...")
+            total_items = 0
+            for item in line_items:
+                amt = parse_money(item.get("amount", "0"))
+                if amt:
+                    total_items += amt
+            
+            if total_items > 0:
+                if not data["Số tiền trước Thuế"] and not data["Số tiền sau"]:
+                     # Assume line items are pre-tax (standard) or post-tax? 
+                     # Usually line items amount column is Before Tax.
+                     data["Số tiền trước Thuế"] = format_money(total_items)
+                elif not data["Số tiền trước Thuế"]:
+                     data["Số tiền trước Thuế"] = format_money(total_items)
+                elif not data["Số tiền sau"]:
+                     # If we have PreTax but no PostTax, we need Tax to calc Total.
+                     # If we just calculated PreTax, let's see if we can calc Total
+                     pass
+                     
+        # Re-run Tax Calculation in case we just populated Pre-Tax from items
+        if data["Tiền thuế"] and not data["Số tiền sau"] and data["Số tiền trước Thuế"]:
+             b = parse_money(data["Số tiền trước Thuế"])
+             t = parse_money(data["Tiền thuế"])
+             if b and t:
+                 data["Số tiền sau"] = format_money(b + t)
+        
+        # --- NEW STRATEGY: PARSE SUMMARY TABLES (Footer) ---
+        # Many invoices (like PSD.pdf and 0318...pdf) have a summary block with tax rates
+        # Pattern: "Hàng hóa ... 8% ... [PreTax] ... [Tax] ... [Total]"
+        # Pattern: "Cộng HHDV ... 10% ... [PreTax] ... [Tax]"
+        
+        # 1. Parse Detail Lines for Tax Rates (8%, 10%, 5%, 0%)
+        # Look for lines containing "8%" or "10%" followed by multiple money numbers
+        summary_lines = re.findall(r'(?:Hàng hóa|Cộng HHDV|Thuế suất|Total amount).*?(10%|8%|5%|0%).*?([\d\.,]+)\s+([\d\.,]+)(?:\s+([\d\.,]+))?', full_text, re.IGNORECASE)
+        
+        tax_total_calc = 0
+        pre_tax_total_calc = 0
+        
+        for rate_str, num1, num2, num3 in summary_lines:
+            # Usually: Rate, PreTax, Tax, [Total] OR Rate, [Total], [Tax]
+            # Heuristic: Tax is usually smaller than PreTax. 
+            # num1, num2, num3 are strings.
+            try:
+                vals = [parse_money(n) for n in [num1, num2, num3] if n]
+                vals.sort() # Sorted: [Smallest, Medium, Largest]
+                
+                # Smallest is likely Tax (if > 0)
+                # Largest is Total (or PreTax if Total missing)
+                
+                # If we have 2 numbers: PreTax and Tax
+                # If we have 3 numbers: PreTax, Tax, Total
+                
+                if len(vals) >= 2:
+                    current_tax = vals[0]
+                    current_pre = vals[-1] # Largest is PreTax (if 2 nums) or Total (if 3 nums)? 
+                    # Actually, if 3 nums: Tax, PreTax, Total. PreTax is middle.
+                    if len(vals) == 3:
+                         current_pre = vals[1]
+                    
+                    # Store in specific tax column
+                    rate_key = f"Thuế {rate_str}"
+                    data[rate_key] = format_money(current_tax)
+                    
+                    tax_total_calc += current_tax
+                    pre_tax_total_calc += current_pre
+                    
+                    print(f"  -> Found Summary Line: {rate_str} | Tax: {current_tax} | Pre: {current_pre}")
+            except:
+                pass
+        
+        # If we found summary data, assume it's the source of truth for Totals
+        if tax_total_calc > 0:
+            if not data["Tiền thuế"] or parse_money(data["Tiền thuế"]) != tax_total_calc:
+                 data["Tiền thuế"] = format_money(tax_total_calc)
+        
+        # 2. Parse Grand Total Line with multiple numbers
+        # Pattern: "Tổng cộng tiền ... [PreTax] [Tax] [Total]" (common in 0318...pdf)
+        grand_total_match = re.search(r'(?:Tổng cộng tiền|Grand total).*?([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)', full_text, re.IGNORECASE)
+        if grand_total_match:
+             v1 = parse_money(grand_total_match.group(1))
+             v2 = parse_money(grand_total_match.group(2))
+             v3 = parse_money(grand_total_match.group(3))
+             
+             vals = [v for v in [v1, v2, v3] if v is not None]
+             vals.sort()
+             if len(vals) == 3:
+                 # Tax, PreTax, Total
+                 data["Tiền thuế"] = format_money(vals[0])
+                 data["Số tiền trước Thuế"] = format_money(vals[1])
+                 data["Số tiền sau"] = format_money(vals[2])
+                 print(f"  -> Found Grand Total Line: Total={vals[2]}, Tax={vals[0]}")
+
+        # Missing Lookup Code for PSD.pdf (e5100...)
+        if not data["Mã tra cứu"]:
+             # Pattern: "nhập mã ...", "key in the provided code ... : [code]"
+             code_match = re.search(r'(?:nhập mã|provided code).*?([a-f0-9]{30,})', full_text, re.IGNORECASE)
+             if code_match:
+                 data["Mã tra cứu"] = code_match.group(1)
+        
+        # FINAL: If Tax Rate found (e.g. "Thuế khác": "10") but Column Empty, fill it
+        # This fixes 0318...pdf where "Thuế khác" picked up "10" but didn't fill "Thuế 10%"
+        if data["Thuế khác"] in ["10", "8", "5", "0"]:
+            rate_key = f"Thuế {data['Thuế khác']}%"
+            if not data[rate_key] and data["Tiền thuế"]:
+                data[rate_key] = data["Tiền thuế"]
+                data["Thuế khác"] = ""
+            elif not data[rate_key] and data["Số tiền trước Thuế"]:
+                # Calculate tax from rate
+                try:
+                    rate = int(data["Thuế khác"])
+                    pre = parse_money(data["Số tiền trước Thuế"])
+                    if pre:
+                        calc_tax = pre * rate / 100
+                        data[rate_key] = format_money(calc_tax)
+                        if not data["Tiền thuế"]:
+                             data["Tiền thuế"] = format_money(calc_tax)
+                        
+                        # Use loose check for Total assignment
+                        current_total = parse_money(data["Số tiền sau"])
+                        pre_val = parse_money(data["Số tiền trước Thuế"])
+                        
+                        # If Total is empty OR Total == PreTax (from premature assignment), update it!
+                        if not data["Số tiền sau"] or (current_total and pre_val and abs(current_total - pre_val) < 100):
+                             data["Số tiền sau"] = format_money(pre + calc_tax)
+                        
+                        data["Thuế khác"] = ""
+                except:
+                    pass
+
+        
         
         # Store line items for multi-row expansion
         if services:
-            line_items = services  # services is now list of dicts with name, qty, unit_price, amount
+            line_items = services
+            # POST-PROCESS: Clean garbage from items
+            for item in line_items:
+                for k in ["name", "amount"]:
+                    val = item.get(k, "")
+                    if isinstance(val, str) and ("0'}" in val or "}'}" in val):
+                        # Standard Garbage Removal using Regex
+                        garbage_match = re.search(r"0'}.*?([\d\.,]+).*?'\}'\}", val, re.DOTALL)
+                        if garbage_match:
+                             # We found hidden numbers in garbage, but we trust the Footer Summary Table now for Totals.
+                             # So just clean the item value.
+                             item[k] = val.replace(garbage_match.group(0), "").strip()
+                        else:
+                             item[k] = val.replace("0'}", "").replace("'}'}", "").replace("'}", "").replace("{'", "").strip()
             
+            # FINAL CHECK: Sanity check Tax Amount (Run AFTER post-process updates)
+            if data["Tiền thuế"] and (data["Số tiền trước Thuế"] or data["Số tiền sau"]):
+                 try:
+                    t_val = parse_money(data["Tiền thuế"])
+                    # Use PreTax, or infer from Total if Tax is huge
+                    p_val = parse_money(data["Số tiền trước Thuế"]) 
+                    if not p_val and data["Số tiền sau"]:
+                         # Assume Total > Tax
+                         p_val = parse_money(data["Số tiền sau"])
+                    
+                    if t_val and p_val and p_val > 10000 and t_val >= p_val: # Strict Check: Tax >= PreTax/Total
+                        print(f"  -> Discarding suspicious Tax Amount: {data['Tiền thuế']} (Validation Failed: > Amount)")
+                        data["Tiền thuế"] = ""
+                        for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác"]:
+                             if parse_money(data[c]) == t_val:
+                                 data[c] = ""
+                 except:
+                    pass
+
     except Exception as e:
         print(f"Error processing {filename}: {e}")
     
+    # FINAL CLEANUP: Clean all data fields
+    for k, v in data.items():
+        if isinstance(v, str):
+            data[k] = clean_string_value(v)
+            
+    # Extra cleanup for Tax Rate fields
+    if data.get("Thuế khác"):
+         # If it's just a rate like "10" and we already have "Thuế 10%" filled, clear "Thuế khác"
+         if data["Thuế khác"] in ["10", "8", "5", "0"]:
+              rate_key = f"Thuế {data['Thuế khác']}%"
+              if data.get(rate_key):
+                   data["Thuế khác"] = ""
+         
+         # If it matches Total or Tax, it's noise
+         v_num = parse_money(data["Thuế khác"])
+         t_num = parse_money(data.get("Số tiền sau"))
+         tax_num = parse_money(data.get("Tiền thuế"))
+         if v_num and (v_num == t_num or v_num == tax_num):
+              data["Thuế khác"] = ""
+
     return data, line_items
+
+
+def clean_string_value(val):
+    """Clean string values from control characters and excessive whitespace."""
+    if not isinstance(val, str):
+        return val
+    # Remove control characters like \r, \xad
+    val = val.replace('\r', '').replace('\xad', '').replace('\t', ' ')
+    # Normalize whitespace
+    val = " ".join(val.split())
+    return val
+
 
 
 def format_excel_output(file_path):

@@ -33,6 +33,9 @@ CATEGORY_KEYWORDS = {
     ],
     "Phụ tùng/Thiết bị": [
         "tay đẩy", "thiết bị", "phụ tùng", "linh kiện"
+    ],
+    "Xăng dầu": [
+        "xăng", "dầu", "diesel", "ron95", "ron92", "e5", "do 0.05s", "do 0,001s-v"
     ]
 }
 

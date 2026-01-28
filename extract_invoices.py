@@ -752,6 +752,15 @@ def extract_invoice_data(pdf_source, filename=None):
              if not any(x in potential_mst for x in ignore_mst):
                  data["Mã số thuế"] = potential_mst
         
+        # Priority 0.5: VAT Code pattern (hotel invoices at footer)
+        # Pattern: "VAT Code: 0300659964" or "VATCode: ..."
+        if not data["Mã số thuế"]:
+            vat_code_match = re.search(r'VAT\s*Code[:\s]*(\d{10,14})', full_text, re.IGNORECASE)
+            if vat_code_match:
+                potential_mst = vat_code_match.group(1).strip()
+                if not any(x in potential_mst for x in ignore_mst):
+                    data["Mã số thuế"] = potential_mst
+        
         # Priority 1: Contextual match near "Đơn vị bán" or "Seller"
         # Only run if Priority 0 didn't find anything
         if not data["Mã số thuế"]:
@@ -794,7 +803,10 @@ def extract_invoice_data(pdf_source, filename=None):
         
         # INVOICE NUMBER - Multiple patterns (order matters - more specific first)
         inv_patterns = [
-            r'Số\s*\(No\.?\)[:\s]*(\d{5,})',  # M-INVOICE: Số(No.): 00007155 (at least 5 digits)
+            (r'(\d{8})\nSố HĐ\s*/\s*Invoice No\.', 0),  # C26MAP reverse: 00001348\nSố HĐ / Invoice No.:
+            (r'Số HĐ\s*/\s*Invoice No\.?[:\s]*[\n\s]*(\d{5,})', re.DOTALL),  # C26MAP: Số HĐ / Invoice No.:\n00001348
+            (r'Invoice No\.?[:\s]*[\n\s]*(\d{5,})', re.DOTALL),  # Generic Invoice No: 00001348
+            (r'Số\s*\(No\.?\)[:\s]*(\d{5,})', 0),  # M-INVOICE: Số(No.): 00007155 (at least 5 digits)
             r'Số[/\s]*\(Invoice No\.?\)[:\s]*(\d+)',
             r'\(RESTAURANT BILL\)\s*(\d+)',  # VNPT Restaurant: (RESTAURANT BILL) 00004501
             r'Số:\s*(\d+)',  # Explicit colon: Số: 00007155
@@ -804,8 +816,12 @@ def extract_invoice_data(pdf_source, filename=None):
             r'S[óố][: ]+\s*(\d+)',  # OCR typo: Só/Số
             # NOTE: Removed generic 'Số[:\s]+(\d+)' - too broad, matches addresses
         ]
-        for pattern in inv_patterns:
-            match = re.search(pattern, full_text, re.IGNORECASE)
+        for pattern_item in inv_patterns:
+            if isinstance(pattern_item, tuple):
+                pattern, flags = pattern_item
+                match = re.search(pattern, full_text, re.IGNORECASE | flags)
+            else:
+                match = re.search(pattern_item, full_text, re.IGNORECASE)
             if match:
                 data["Số hóa đơn"] = match.group(1)
                 break
@@ -813,7 +829,8 @@ def extract_invoice_data(pdf_source, filename=None):
         # Fallback: Extract from filename if missing
         if not data["Số hóa đơn"]:
             # Try to find a long number in filename?
-            fname = os.path.splitext(os.path.basename(pdf_path))[0]
+            fname_for_num = filename if filename else (os.path.basename(pdf_source) if isinstance(pdf_source, str) else "")
+            fname = os.path.splitext(fname_for_num)[0]
             # Split by underscores or hyphens
             parts = re.split(r'[_\-\s]', fname)
             # Filter for pure digit sequences, reasonable length (e.g. >3)
@@ -917,6 +934,7 @@ def extract_invoice_data(pdf_source, filename=None):
         
         # SERIAL NUMBER (Ký hiệu) - Multiple patterns INCLUDING "Series"
         serial_patterns = [
+            r'Ký hiệu\s*/\s*Serial[:\s]*([A-Z0-9]+)',  # C26MAP: Ký hiệu / Serial: 1C26MAP
             r'[KK]ý hiệu\s*/\s*\([Ss]erial(?:\s*No\.?)?\)[:\s]*([A-Z0-9]+)',  # Format with slash: Ký hiệu/ (Serial No)
             r'[KK]ý hiệu\s*\([Ss]erial\)[:\s]*([A-Z0-9]+)',  # VNPT: Ký hiệu(Serial): 1K25THA
             r'[KK]ý hiệu\s*\([Ss]erial(?:\s*No\.?)?\)[:\s]*([A-Z0-9]+)',  # M-INVOICE
@@ -932,6 +950,7 @@ def extract_invoice_data(pdf_source, filename=None):
         
         # SECURITY CODE (Mã tra cứu) - Multiple patterns
         security_patterns = [
+            r'Mã tra cứu hoá đơn[:\s]*([A-Za-z0-9]+)',  # C26MAP: Mã tra cứu hoá đơn: 9751Opera19012026
             r'Mã nhận hóa đơn\s*\([Cc]ode for checking\)[:\s]*([A-Z0-9]+)',  # Special case
             r'Mã tra cứu\s*\([Ll]ookup\s*code\)[:\s]*([A-Za-z0-9_]+)',  # VNPT: Mã tra cứu(Lookup code):HCM...
             r'Mã tra cứu hóa đơn\s*\([Ii]nvoice code\)[:\s]*([A-Za-z0-9_]+)',  # MISA variation
@@ -1026,12 +1045,12 @@ def extract_invoice_data(pdf_source, filename=None):
         # AMOUNTS - Multiple patterns
         # Before tax
         before_tax_patterns = [
+            r'Cộng tiền hàng\s*/\s*Total charges[:\s]*([\d\.,]+)',  # C26MAP: Cộng tiền hàng / Total charges: 6.615.000
             r'Cộng tiền hàng[^:]*[:\s]*([\d\.,]+)',
             r'Cộng ti[êề]n hàng[^:]*[:\s]*([\d\.,]+)', # OCR typo: tiên
             r'Tổng tiền chưa thuế[^:]*[:\s]*([\d\.,]+)',  # M-INVOICE
             r'Thành ti[êềẫ]n trước thuế[^:]*[:\s]*([\d\.,]+)', # OCR typo: tiễn
             r'Amount before VAT[^:]*[:\s]*([\d\.,]+)',
-            r'[Tt]otal amount[^:]*[:\s]*([\d\.,]+)',
             r'Sub total[^:]*[:\s]*([\d\.,]+)',
         ]
         for pattern in before_tax_patterns:
@@ -1043,6 +1062,7 @@ def extract_invoice_data(pdf_source, filename=None):
         
         # VAT AMOUNT (Tiền thuế)
         vat_patterns = [
+            r'Tiền thuế GTGT\s*/\s*VAT[:\s]*([\d\.,]+)',  # C26MAP: Tiền thuế GTGT / VAT: 529.200
             r'Tổng tiền thuế GTGT \d+%[:\s]*([\d\.,]+)', # Specific rate line
             r'\|?Tiền thu[êế] GTGT\s*\(\s*\d+\s*%\s*\)\s*([\d\.,]+)', # MOST SPECIFIC: |Tiền thuê GTGT ( 8% ) 59.265
             r'\|?Tiền thu[êế] GTGT[^:]*[:\s]+(\d[\d\.,]+)', # |Tiền thuê GTGT: 59.265
@@ -1156,6 +1176,7 @@ def extract_invoice_data(pdf_source, filename=None):
         
         # After tax (total payment)
         after_tax_patterns = [
+            r'Tổng cộng\s*/\s*Total Amount[:\s]*([\d\.,]+)',  # C26MAP: Tổng cộng / Total Amount: 7.144.200
             # Golden Gate 5-column FIRST (most specific): 5 numbers separated by spaces
             r'Tổng cộng tiền thanh toán\s*\(Total amount\)\s*([\d\.,\s]+)', # Golden Gate: 5 numbers, take the last one
             # 3-column patterns

@@ -130,11 +130,32 @@ else:
                         cell.alignment = Alignment(vertical="center", wrap_text=True)
             
             # Merge cells for multi-tax-rate invoices
-            # Columns to merge: A(Team), H(Trước VAT), I(VAT), K(Sau thuế)
-            # All other columns NOT merged
-            merge_cols = [1, 8, 9, 11]  # A, H, I, K
+            # Columns to merge by filename: H(Trước VAT), I(VAT), K(Sau thuế)
+            # Team column (A) ALWAYS merged by Team value
+            merge_by_file_cols = [8, 9, 11]  # H, I, K
             
-            # Track invoice groups by filename (column M = 13)
+            # First: Merge Team column by Team value (column A = 1)
+            if len(df) > 0:
+                start_row = 2
+                current_team = worksheet.cell(row=2, column=1).value
+                
+                for excel_row in range(3, worksheet.max_row + 2):
+                    if excel_row > worksheet.max_row:
+                        cell_value = None
+                    else:
+                        cell_value = worksheet.cell(row=excel_row, column=1).value
+                    
+                    if cell_value != current_team:
+                        end_row = excel_row - 1
+                        if end_row > start_row:
+                            worksheet.merge_cells(f"A{start_row}:A{end_row}")
+                            top_cell = worksheet.cell(row=start_row, column=1)
+                            top_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                        
+                        start_row = excel_row
+                        current_team = cell_value
+            
+            # Second: Merge money columns by filename (column M = 13)
             if len(df) > 1:
                 start_row = 2  # Excel row 2 (after header)
                 current_file = worksheet.cell(row=2, column=13).value
@@ -149,15 +170,12 @@ else:
                         # End of group - merge if group size > 1
                         end_row = excel_row - 1
                         if end_row > start_row:
-                            for col_idx in merge_cols:
+                            for col_idx in merge_by_file_cols:
                                 col_letter = get_column_letter(col_idx)
                                 worksheet.merge_cells(f"{col_letter}{start_row}:{col_letter}{end_row}")
                                 # Set alignment for merged cell
                                 top_cell = worksheet.cell(row=start_row, column=col_idx)
-                                if col_idx in [8, 9, 11]:  # Money columns (H, I, K)
-                                    top_cell.alignment = Alignment(horizontal="right", vertical="center")
-                                else:
-                                    top_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                                top_cell.alignment = Alignment(horizontal="right", vertical="center")
                         
                         start_row = excel_row
                         current_file = cell_value

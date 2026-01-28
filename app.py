@@ -23,6 +23,7 @@ st.set_page_config(page_title="Invoice Extractor", page_icon="🧾", layout="wid
 
 # Category options for dropdown
 CATEGORY_OPTIONS = [
+    "Tự động nhận diện",  # Auto-detect based on invoice content
     "Dịch vụ ăn uống",
     "Dịch vụ phòng nghỉ", 
     "Hoa tươi",
@@ -38,40 +39,20 @@ if "processing_complete" not in st.session_state:
 if "processed_df" not in st.session_state:
     st.session_state["processed_df"] = None
 
-# User Identification Logic
-if "user_name" not in st.session_state:
-    st.title("🔐 Xác thực người dùng")
-    st.info("Vui lòng nhập tên của bạn để truy cập hệ thống.")
-    
-    with st.container(border=True):
-        name_input = st.text_input("Tên của bạn:", placeholder="Ví dụ: Huy, Lan...")
-        if st.button("Bắt đầu làm việc", type="primary"):
-            if name_input.strip():
-                st.session_state["user_name"] = name_input.strip()
-                logger.info(f"--- USER LOGIN: {st.session_state['user_name']} ---")
-                st.rerun()
-            else:
-                st.warning("Vui lòng nhập tên để tiếp tục!")
+# --- Main Application Logic (no login required) ---
 
-else:
-    # --- Main Application Logic ---
-    current_user = st.session_state["user_name"]
-    
-    # Sidebar
-    with st.sidebar:
-        st.write(f"👤 User: **{current_user}**")
-        if st.button("Đăng xuất"):
-            logger.info(f"--- USER LOGOUT: {current_user} ---")
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+# Sidebar
+with st.sidebar:
+    st.markdown("**Invoice Extractor**")
+    st.markdown("---")
+    st.caption("Phan tich va trich xuat du lieu tu hoa don PDF")
 
-    # App Title
-    st.title("🧾 Invoice Extraction Tool")
-    
-    # --- WIZARD FLOW ---
-    
-    if st.session_state["processing_complete"] and st.session_state["processed_df"] is not None:
+# App Title
+st.title("Invoice Extraction Tool")
+
+# --- WIZARD FLOW ---
+
+if st.session_state["processing_complete"] and st.session_state["processed_df"] is not None:
         # === STEP 4: RESULTS & EXPORT ===
         st.markdown("### ✅ Kết quả xử lý")
         
@@ -239,7 +220,7 @@ else:
             st.write(f"Đã chọn **{len(uploaded_files)}** file.")
             
             if st.button("🚀 Bắt đầu trích xuất dữ liệu", type="primary"):
-                logger.info(f"--- ACTION: User {current_user} started processing {len(uploaded_files)} files ---")
+                logger.info(f"--- ACTION: Team={team_input}, Employee={employee_input} started processing {len(uploaded_files)} files ---")
                 
                 progress_bar = st.progress(0)
                 status_box = st.empty()
@@ -257,6 +238,13 @@ else:
                         # Determine classification
                         if category_select == "Khác (Nhập tay)" and custom_category.strip():
                             final_category = custom_category.strip()
+                        elif category_select == "Tự động nhận diện":
+                            # Auto-detect based on invoice content
+                            if line_items:
+                                all_item_names = " ".join([item.get("name", "") for item in line_items])
+                                final_category = classify_content(all_item_names, data.get("Đơn vị bán", ""))
+                            else:
+                                final_category = classify_content("", data.get("Đơn vị bán", ""))
                         else:
                             final_category = category_select
                         

@@ -4,6 +4,7 @@ import io
 import os
 import logging
 import sys
+import re
 from extract_invoices import extract_invoice_data, classify_content
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -13,14 +14,24 @@ from openpyxl.utils import get_column_letter
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
-# Configure page - MUST be the first Streamlit command
+# Configure page
 st.set_page_config(page_title="Invoice Extractor", page_icon="🧾", layout="wide")
+
+# Category options for dropdown
+CATEGORY_OPTIONS = [
+    "Tự động nhận diện",
+    "Dịch vụ ăn uống",
+    "Dịch vụ phòng nghỉ", 
+    "Hoa tươi",
+    "Thẻ cào điện thoại",
+    "Xăng xe",
+    "Quà tặng",
+    "Khác (Nhập tay)"
+]
 
 # Initialize Session State
 if "processing_complete" not in st.session_state:
@@ -62,38 +73,33 @@ else:
     # --- WIZARD FLOW ---
     
     if st.session_state["processing_complete"] and st.session_state["processed_df"] is not None:
-        # === STEP 3: RESULTS & EXPORT ===
-        st.markdown("### ✅ Bước 3: Kết quả xử lý")
+        # === STEP 4: RESULTS & EXPORT ===
+        st.markdown("### ✅ Kết quả xử lý")
         
-        # Action Buttons
         col_res1, col_res2 = st.columns([1, 4])
         with col_res1:
             if st.button("⬅️ Làm việc với file khác"):
-                # Reset state
                 st.session_state["processing_complete"] = False
                 st.session_state["processed_df"] = None
                 st.rerun()
         
         df = st.session_state["processed_df"]
         
-        # Excel Export Logic (Pre-calculated for download button)
+        # Excel Export with Merge Logic
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name="Hóa đơn")
             worksheet = writer.sheets["Hóa đơn"]
             
-            # Define Styles
+            # Styles
             header_font = Font(bold=True, color="FFFFFF", size=11, name="Arial")
             header_fill = PatternFill("solid", fgColor="4F81BD")
             border_style = Side(style='thin', color="000000")
             border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
             
             # Column widths
-            widths = {
-                'A': 30, 'B': 12, 'C': 15, 'D': 40, 'E': 18,
-                'F': 18, 'G': 12, 'H': 12, 'I': 12, 'J': 12, 'K': 12,
-                'L': 12, 'M': 15, 'N': 18, 'O': 15, 'P': 20, 'Q': 15, 'R': 15, 'S': 12
-            }
+            widths = {'A': 15, 'B': 15, 'C': 12, 'D': 15, 'E': 15, 'F': 30, 'G': 18, 
+                      'H': 15, 'I': 12, 'J': 10, 'K': 15, 'L': 18, 'M': 35}
             for col_letter, width in widths.items():
                 worksheet.column_dimensions[col_letter].width = width
 
@@ -108,8 +114,8 @@ else:
             worksheet.auto_filter.ref = worksheet.dimensions
             
             # Format Data
-            money_cols_idx = [6, 7, 8, 9, 10, 11, 12, 13, 14] 
-            center_cols_idx = [2, 3, 5, 17, 19]
+            money_cols_idx = [8, 9, 11]  # H, I, K
+            center_cols_idx = [1, 2, 3, 4, 5, 10]  # A-E, J
             
             for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
                 for cell in row:
@@ -123,12 +129,42 @@ else:
                         cell.alignment = Alignment(horizontal="center", vertical="center")
                     else:
                         cell.alignment = Alignment(vertical="center", wrap_text=True)
+            
+            # Merge cells for multi-tax-rate invoices
+            # Columns to merge: A(Team), H(Trước VAT), I(VAT), K(Sau thuế)
+            # All other columns NOT merged
+            merge_cols = [1, 8, 9, 11]  # A, H, I, K
+            
+            # Track invoice groups by filename (column M = 13)
+            if len(df) > 1:
+                start_row = 2  # Excel row 2 (after header)
+                current_file = worksheet.cell(row=2, column=13).value
+                
+                for excel_row in range(3, worksheet.max_row + 2):  # +2 to include last row check
+                    if excel_row > worksheet.max_row:
+                        cell_value = None
+                    else:
+                        cell_value = worksheet.cell(row=excel_row, column=13).value
+                    
+                    if cell_value != current_file:
+                        # End of group - merge if group size > 1
+                        end_row = excel_row - 1
+                        if end_row > start_row:
+                            for col_idx in merge_cols:
+                                col_letter = get_column_letter(col_idx)
+                                worksheet.merge_cells(f"{col_letter}{start_row}:{col_letter}{end_row}")
+                                # Set alignment for merged cell
+                                top_cell = worksheet.cell(row=start_row, column=col_idx)
+                                if col_idx in [8, 9, 11]:  # Money columns (H, I, K)
+                                    top_cell.alignment = Alignment(horizontal="right", vertical="center")
+                                else:
+                                    top_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                        
+                        start_row = excel_row
+                        current_file = cell_value
 
         output.seek(0)
         
-        with col_res1: # Add download button next to reset
-             pass       
-            
         st.download_button(
             label="💾 Tải file Excel kết quả",
             data=output,
@@ -142,8 +178,30 @@ else:
         st.dataframe(df, use_container_width=True)
 
     else:
-        # === STEP 1 & 2: UPLOAD & PROCESS ===
-        st.markdown("### 📂 Bước 1: Tải hóa đơn (PDF)")
+        # === STEP 1: REQUIRED INPUTS ===
+        st.markdown("### 📝 Bước 1: Thông tin bắt buộc")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            team_input = st.text_input("Team *", placeholder="Ví dụ: Team A, Team B...")
+        with col2:
+            employee_input = st.text_input("Tên nhân viên *", placeholder="Ví dụ: Nguyễn Văn A...")
+        
+        # === STEP 2: OPTIONAL CLASSIFICATION ===
+        st.markdown("### 🏷️ Bước 2: Phân loại (Tùy chọn)")
+        
+        col_cat1, col_cat2 = st.columns(2)
+        with col_cat1:
+            category_select = st.selectbox("Chọn phân loại:", CATEGORY_OPTIONS)
+        with col_cat2:
+            custom_category = ""
+            if category_select == "Khác (Nhập tay)":
+                custom_category = st.text_input("Nhập phân loại tùy chỉnh:")
+        
+        st.divider()
+        
+        # === STEP 3: FILE UPLOAD ===
+        st.markdown("### 📂 Bước 3: Tải hóa đơn (PDF)")
         
         uploaded_files = st.file_uploader(
             "Kéo thả hoặc chọn nhiều file PDF vào đây", 
@@ -153,10 +211,19 @@ else:
 
         if uploaded_files:
             st.divider()
-            st.markdown("### ⚙️ Bước 2: Xử lý dữ liệu")
+            st.markdown("### ⚙️ Bước 4: Xử lý dữ liệu")
             st.write(f"Đã chọn **{len(uploaded_files)}** file.")
             
-            if st.button(f"🚀 Bắt đầu trích xuất dữ liệu", type="primary"):
+            # Validation
+            can_process = True
+            if not team_input.strip():
+                st.warning("⚠️ Vui lòng nhập **Team** trước khi xử lý!")
+                can_process = False
+            if not employee_input.strip():
+                st.warning("⚠️ Vui lòng nhập **Tên nhân viên** trước khi xử lý!")
+                can_process = False
+            
+            if can_process and st.button("🚀 Bắt đầu trích xuất dữ liệu", type="primary"):
                 logger.info(f"--- ACTION: User {current_user} started processing {len(uploaded_files)} files ---")
                 
                 progress_bar = st.progress(0)
@@ -172,14 +239,70 @@ else:
                         data, line_items = extract_invoice_data(uploaded_file, filename=uploaded_file.name)
                         uploaded_file.seek(0)
                         
-                        # Classify
-                        if line_items:
-                            all_item_names = " ".join([item.get("name", "") for item in line_items])
-                            data["Phân loại"] = classify_content(all_item_names, data.get("Đơn vị bán", ""))
+                        # Determine classification
+                        if category_select == "Khác (Nhập tay)" and custom_category.strip():
+                            final_category = custom_category.strip()
+                        elif category_select != "Tự động nhận diện":
+                            final_category = category_select
                         else:
-                            data["Phân loại"] = "Khác"
+                            # Auto-detect
+                            if line_items:
+                                all_item_names = " ".join([item.get("name", "") for item in line_items])
+                                final_category = classify_content(all_item_names, data.get("Đơn vị bán", ""))
+                            else:
+                                final_category = "Khác"
                         
-                        all_rows.append(data)
+                        # Determine tax rate(s)
+                        tax_rates = []
+                        for rate in ["0%", "5%", "8%", "10%"]:
+                            col_name = f"Thuế {rate}"
+                            if data.get(col_name) and data.get(col_name) != "":
+                                tax_rates.append(rate)
+                        
+                        if data.get("Thuế khác"):
+                            tax_rates.append("Khác")
+                        
+                        if not tax_rates:
+                            tax_rates = ["N/A"]
+                        
+                        # Create row(s) for this invoice
+                        base_row = {
+                            "Team": team_input.strip(),
+                            "Số hóa đơn": data.get("Số hóa đơn", ""),
+                            "Ngày hóa đơn": data.get("Ngày hóa đơn", ""),
+                            "Mã số thuế bên bán": data.get("Mã số thuế", ""),
+                            "Số ký hiệu": data.get("Ký hiệu", ""),
+                            "Link tra cứu": data.get("Link lấy hóa đơn", "") or data.get("Mã tra cứu", ""),
+                            "Phân loại": final_category,
+                            "Số tiền trước VAT": data.get("Số tiền trước Thuế", ""),
+                            "Tổng tiền sau thuế": data.get("Số tiền sau", ""),
+                            "Tên nhân viên": employee_input.strip(),
+                            "Tên file": uploaded_file.name
+                        }
+                        
+                        # Handle multi-rate invoices
+                        if len(tax_rates) == 1:
+                            # Single rate - simple case
+                            rate = tax_rates[0]
+                            if rate == "N/A":
+                                base_row["VAT"] = data.get("Tiền thuế", "")
+                                base_row["Thuế suất"] = ""
+                            else:
+                                base_row["VAT"] = data.get(f"Thuế {rate}", data.get("Tiền thuế", ""))
+                                base_row["Thuế suất"] = rate
+                            all_rows.append(base_row)
+                        else:
+                            # Multiple rates - create multiple rows
+                            for rate in tax_rates:
+                                row = base_row.copy()
+                                if rate == "Khác":
+                                    row["VAT"] = data.get("Thuế khác", "")
+                                    row["Thuế suất"] = "Khác"
+                                else:
+                                    row["VAT"] = data.get(f"Thuế {rate}", "")
+                                    row["Thuế suất"] = rate
+                                all_rows.append(row)
+                        
                     except Exception as e:
                         logger.error(f"Error processing {uploaded_file.name}: {e}")
                         status_box.error(f"Lỗi khi xử lý {uploaded_file.name}")
@@ -187,40 +310,29 @@ else:
                 status_box.success("✅ Đã xử lý xong tất cả!")
                 logger.info(f"--- COMPLETION: User {current_user} finished processing ---")
                 
-                # Create DataFrame
-                df = pd.DataFrame(all_rows)
-                
-                # Column standardization
+                # Create DataFrame with new column order
                 columns = [
-                    "Tên file", "Ngày hóa đơn", "Số hóa đơn", "Đơn vị bán", "Phân loại",
-                    "Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác",
-                    "Phí PV", "Tiền thuế", "Số tiền sau", "Link lấy hóa đơn",
-                    "Mã tra cứu", "Mã số thuế", "Mã CQT", "Ký hiệu"
+                    "Team", "Số hóa đơn", "Ngày hóa đơn", "Mã số thuế bên bán", 
+                    "Số ký hiệu", "Link tra cứu", "Phân loại", 
+                    "Số tiền trước VAT", "VAT", "Thuế suất", "Tổng tiền sau thuế",
+                    "Tên nhân viên", "Tên file"
                 ]
+                df = pd.DataFrame(all_rows)
                 for col in columns:
                     if col not in df.columns:
                         df[col] = ""
                 df = df[columns]
                 
-                # Convert numbers
-                money_columns = ["Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác", "Tiền thuế", "Số tiền sau", "Phí PV"]
+                # Convert money columns
+                money_columns = ["Số tiền trước VAT", "VAT", "Tổng tiền sau thuế"]
                 for col in money_columns:
                     def convert_to_number(x):
                         if pd.isna(x) or x == '': return None
                         x_str = str(x).strip()
-                        if ',' in x_str and x_str.endswith(',') == False:
-                             # Check valid vietnamese currency format if comma is close to end
-                             pass
-                        
-                        # Simple robust cleaning
-                        # If comma is decimal separator (2 digits at end), swap. 
-                        # Else remove comma/dot and just take int
-                        import re
                         if re.search(r',\d{2}$', x_str):
                             x_str = x_str.replace('.', '').replace(',', '.')
                         else:
                             x_str = x_str.replace('.', '').replace(',', '')
-                            
                         try:
                             return round(float(x_str))
                         except:

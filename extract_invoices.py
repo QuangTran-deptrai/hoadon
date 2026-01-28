@@ -9,35 +9,38 @@ from openpyxl.utils import get_column_letter
 
 # Category mapping based on extracted services
 CATEGORY_KEYWORDS = {
-    "Ăn uống": [
+    "Dịch vụ ăn uống": [
         "món", "lẩu", "gà", "bò", "heo", "cá", "cua", "mực", "tôm", "ghẹ", "sò", 
         "gỏi", "xào", "nướng", "chiên", "hấp", "hầm", "quay", "cơm", "xôi", "soup",
         "trà", "cà phê", "nước", "coca", "matcha", "oolong", "trái cây", "bánh",
         "đậu", "trứng", "lươn", "hàu", "khô mực", "khăn lạnh", "hủ tiếu", "baba",
-        "bồ câu", "chả", "dừa", "khoáng", "suối", "sả","Rượu","DÊ QUAY LẠNG"
+        "bồ câu", "chả", "dừa", "khoáng", "suối", "sả", "rượu", "coffee", "cafe",
+        "katinat", "highlands", "starbucks", "phúc long", "trung nguyên", "golden gate",
+        "pizza", "kfc", "lotteria", "jollibee", "mcdonald", "domino"
     ],
-    "Viễn thông": [
-        "cước", "di động", "thẻ cào", "sim", "điện thoại", "internet", "mạng", "mệnh giá","THE CAO MENH GIA"
+    "Dịch vụ phòng nghỉ": [
+        "thuê phòng", "phòng số", "cho thuê phòng", "phòng họp", "meeting room",
+        "hotel", "khách sạn", "homestay", "resort"
     ],
-    "Dịch vụ IT": [
-        "cài đặt", "máy tính", "sửa chữa", "bảo trì", "setup", "install", "văn phòng"
+    "Hoa tươi": [
+        "hoa tươi", "hoa", "bó hoa", "lãng hoa", "kệ hoa"
     ],
-    "Thuê phòng": [
-        "thuê phòng", "phòng số", "cho thuê phòng", "phòng họp", "meeting room"
+    "Thẻ cào điện thoại": [
+        "cước", "di động", "thẻ cào", "sim", "điện thoại", "internet", "mạng", "mệnh giá",
+        "THE CAO MENH GIA", "viettel", "mobifone", "vinaphone"
     ],
-    "Vận chuyển": [
-        "thuê xe", "vận chuyển", "taxi", "grab", "giao hàng", "shipping", "ôtô"
+    "Xăng xe": [
+        "xăng", "dầu", "diesel", "ron95", "ron92", "e5", "do 0.05s", "petrolimex"
     ],
-    "Hoa/Quà tặng": [
-        "hoa tươi", "hoa", "quà", "gift"
-    ],
-    "Phụ tùng/Thiết bị": [
-        "tay đẩy", "thiết bị", "phụ tùng", "linh kiện"
-    ],
-    "Xăng dầu": [
-        "xăng", "dầu", "diesel", "ron95", "ron92", "e5", "do 0.05s", "do 0,001s-v"
+    "Quà tặng": [
+        "quà", "gift", "quà tặng", "tặng phẩm"
     ]
 }
+
+# F&B brand names for seller-based classification
+FB_BRANDS = ["KATINAT", "HIGHLANDS", "STARBUCKS", "PHÚC LONG", "COFFEE HOUSE", 
+             "TRUNG NGUYÊN", "GOLDEN GATE", "PIZZA", "KFC", "LOTTERIA", 
+             "JOLLIBEE", "MCDONALD", "DOMINO"]
 
 def classify_content(services_text, seller_name=""):
     """Classify services into categories using keyword matching with word boundaries."""
@@ -45,10 +48,8 @@ def classify_content(services_text, seller_name=""):
     # Priority: Check Seller Name for known F&B brands
     if seller_name:
         seller_upper = seller_name.upper()
-        # F&B Brands that are definitely "Ăn uống"
-        fb_brands = ["KATINAT", "HIGHLANDS", "STARBUCKS", "PHÚC LONG", "COFFEE HOUSE", "TRUNG NGUYÊN", "GOLDEN GATE", "PIZZA", "KFC", "LOTTERIA", "JOLLIBEE", "MCDONALD", "DOMINO"]
-        if any(brand in seller_upper for brand in fb_brands):
-            return "Ăn uống"
+        if any(brand in seller_upper for brand in FB_BRANDS):
+            return "Dịch vụ ăn uống"
 
     if not services_text:
         return "Khác"

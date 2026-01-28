@@ -597,7 +597,8 @@ def extract_invoice_data(pdf_source, filename=None):
         "Mã tra cứu": "",
         "Mã số thuế": "",
         "Mã CQT": "",
-        "Ký hiệu": ""
+        "Ký hiệu": "",
+        "Phí PV": ""
     }
     # Store line items separately for multi-row expansion
     line_items = []
@@ -1045,6 +1046,13 @@ def extract_invoice_data(pdf_source, filename=None):
                      # This is risky but better than nothing for 0318...pdf
                      pass
 
+        # SERVICE CHARGE (Phí PV)
+        # Pattern: Phí PV(Sevice change): 400.507
+        pv_match = re.search(r'Phí\s*PV[^:]*[:\s]*([\d\.,]+)', full_text, re.IGNORECASE)
+        if pv_match:
+            data["Phí PV"] = pv_match.group(1)
+
+
 
         # If we found total tax but no breakdown, calculate rate from amounts
         if data["Tiền thuế"] and not any(data[c] for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%"]):
@@ -1442,7 +1450,7 @@ def format_excel_output(file_path):
         widths = {
             'A': 30, 'B': 12, 'C': 15, 'D': 40, 'E': 18,
             'F': 18, 'G': 12, 'H': 12, 'I': 12, 'J': 12, 'K': 12,
-            'L': 15, 'M': 18, 'N': 15, 'O': 20, 'P': 15, 'Q': 15, 'R': 12
+            'L': 12, 'M': 15, 'N': 18, 'O': 15, 'P': 20, 'Q': 15, 'R': 15, 'S': 12
         }
         
         for col_letter, width in widths.items():
@@ -1541,7 +1549,8 @@ def main():
         # Show status
         item_count = len(line_items) if line_items else 0
         seller_display = data['Đơn vị bán'][:30] if data['Đơn vị bán'] and len(data['Đơn vị bán']) > 0 else 'N/A'
-        print(f"  -> Ngay: {data['Ngày hóa đơn']}, So: {data['Số hóa đơn']}, Category: {data['Phân loại']}, DonViBan: {seller_display}...")
+        pv_display = f", PV: {data['Phí PV']}" if data.get('Phí PV') else ""
+        print(f"  -> Ngay: {data['Ngày hóa đơn']}, So: {data['Số hóa đơn']}, Category: {data['Phân loại']}, DonViBan: {seller_display}{pv_display}...")
     
     # Create DataFrame
     df = pd.DataFrame(all_rows)

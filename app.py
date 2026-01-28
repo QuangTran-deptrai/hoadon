@@ -175,7 +175,7 @@ else:
                         # Classify
                         if line_items:
                             all_item_names = " ".join([item.get("name", "") for item in line_items])
-                            data["Phân loại"] = classify_content(all_item_names)
+                            data["Phân loại"] = classify_content(all_item_names, data.get("Đơn vị bán", ""))
                         else:
                             data["Phân loại"] = "Khác"
                         

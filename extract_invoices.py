@@ -39,8 +39,17 @@ CATEGORY_KEYWORDS = {
     ]
 }
 
-def classify_content(services_text):
+def classify_content(services_text, seller_name=""):
     """Classify services into categories using keyword matching with word boundaries."""
+    
+    # Priority: Check Seller Name for known F&B brands
+    if seller_name:
+        seller_upper = seller_name.upper()
+        # F&B Brands that are definitely "Ăn uống"
+        fb_brands = ["KATINAT", "HIGHLANDS", "STARBUCKS", "PHÚC LONG", "COFFEE HOUSE", "TRUNG NGUYÊN", "GOLDEN GATE", "PIZZA", "KFC", "LOTTERIA", "JOLLIBEE", "MCDONALD", "DOMINO"]
+        if any(brand in seller_upper for brand in fb_brands):
+            return "Ăn uống"
+
     if not services_text:
         return "Khác"
     text_lower = services_text.lower()
@@ -1606,7 +1615,7 @@ def main():
         # Classify invoice based on line items
         if line_items:
             all_item_names = " ".join([item.get("name", "") for item in line_items])
-            data["Phân loại"] = classify_content(all_item_names)
+            data["Phân loại"] = classify_content(all_item_names, data.get("Đơn vị bán", ""))
         else:
             data["Phân loại"] = "Khác"
         

@@ -740,16 +740,27 @@ def extract_invoice_data(pdf_source, filename=None):
         # 0106869738: VNPT
         ignore_mst = ['0106869738', '0100684378', '0101245171']
         
-        # Priority 1: Contextual match near "Đơn vị bán" or "Seller"
-        # Search in a window of text
-        seller_block_match = re.search(r'(?:Đơn vị bán|Người bán|Seller)[^:]*[:\s]+(.*?)(?:Mã số thuế|MST|Tax code)[^:]*[:\s]*([0-9\s-]+)', full_text, re.IGNORECASE | re.DOTALL)
-        if seller_block_match:
-             potential_mst = seller_block_match.group(2).replace(' ', '').strip()
-             # Check if it's a valid length MST
-             if len(potential_mst) >= 10 and not any(x in potential_mst for x in ignore_mst):
+        # Priority 0: Spaced MST Pattern (e.g. "0 3 0 1 4 3 3 9 8 4")
+        # This is almost always the distinct Main Company MST at the header.
+        # Must match sequence of digits separated by single spaces, length >= 10 digits
+        spaced_mst_match = re.search(r'Mã số thuế[:\s]*((?:\d\s){9,}\d)', full_text, re.IGNORECASE)
+        if spaced_mst_match:
+             potential_mst = spaced_mst_match.group(1).replace(' ', '').strip()
+             if not any(x in potential_mst for x in ignore_mst):
                  data["Mã số thuế"] = potential_mst
-        else:
-             pass
+        
+        # Priority 1: Contextual match near "Đơn vị bán" or "Seller"
+        # Only run if Priority 0 didn't find anything
+        if not data["Mã số thuế"]:
+             # Search in a window of text
+             seller_block_match = re.search(r'(?:Đơn vị bán|Người bán|Seller)[^:]*[:\s]+(.*?)(?:Mã số thuế|MST|Tax code)[^:]*[:\s]*([0-9\s-]+)', full_text, re.IGNORECASE | re.DOTALL)
+             if seller_block_match:
+                  potential_mst = seller_block_match.group(2).replace(' ', '').strip()
+                  # Check if it's a valid length MST
+                  if len(potential_mst) >= 10 and not any(x in potential_mst for x in ignore_mst):
+                      data["Mã số thuế"] = potential_mst
+             else:
+                  pass
 
         # Priority 2: Standard MST search if Priority 1 failed found nothing or ignored
         if not data["Mã số thuế"]:

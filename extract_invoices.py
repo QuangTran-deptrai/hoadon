@@ -696,21 +696,75 @@ def extract_invoice_data(pdf_source, filename=None):
         
         # ============ EXTRACT FIELDS WITH MULTIPLE PATTERNS ============
         
-        # DATE - Multiple patterns
+        # Date extraction - try multiple patterns
         date_patterns = [
-            r'Ngày\s*\(date\)\s*(\d+)\s*tháng\s*\(month\)\s*(\d+)\s*năm\s*\(year\)\s*(\d+)',
-            r'Ngày\s*\(day\)\s*(\d+)\s*tháng\s*\(month\)\s*(\d+)\s*năm\s*\(year\)\s*(\d+)',
-            r'Ngày\s*\(Date\)\s*(\d+)\s*[Tt]háng\s*\([Mm]onth\)\s*(\d+)\s*[Nn]ăm\s*\([Yy]ear\)\s*(\d+)',
-            r'Ngày\s+(\d+)\s+tháng\s+(\d+)\s+năm\s+(\d+)',  # Sapo: Ngày 14 tháng 8 năm 2025
-            r'Ngày\s*(\d+)\s*tháng\s*(\d+)\s*năm\s*(\d+)',
-            r'Ngày(\d+)tháng(\d+)năm(\d+)',  # No spaces
+            r'Ngày\s*(\d{1,2})\s*tháng\s*(\d{1,2})\s*năm\s*(\d{4})',
+            r'Ngày\s*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})',
+            r'(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})',
+            # Multiline date matching with flexible noise skipping
+            # Allows up to 100 chars of any text (including newlines) between parts
+            r'Ngày[:\s]*(\d{1,2})[\s\S]{0,100}tháng[:\s]*(\d{1,2})[\s\S]{0,100}năm[:\s]*(\d{4})'
         ]
+        
+        # Pre-process text for multiline date matching: remove newlines around Date keywords
+        # This helps with: "Ngày 07 tháng 01\n năm 2026" -> "Ngày 07 tháng 01 năm 2026"
+        minified_text = re.sub(r'(Ngày|tháng|năm)\s*\n\s*', r'\1 ', full_text, flags=re.IGNORECASE)
+        
         for pattern in date_patterns:
-            match = re.search(pattern, full_text, re.IGNORECASE)
+            # Use DOTALL for multiline matching where needed, or standard for single line
+            match = re.search(pattern, full_text, re.IGNORECASE | re.DOTALL)
             if match:
                 day, month, year = match.groups()
-                data["Ngày hóa đơn"] = f"{day}/{month}/{year}"
+                data["Ngày hóa đơn"] = f"{int(day):02d}/{int(month):02d}/{year}"
                 break
+        
+        # SELLER TAX CODE (MST)
+        # Strategy: 
+        # 1. Look for MST explicitly associated with "Seller" or "Don vi ban"
+        # 2. Look for MST generally but skip known "Provider" MSTs
+        # 3. Handle spaces in MST (0 3 0 ...)
+        
+        # Known Provider MSTs to ignore (VNPT, Viettel, BKAV, etc often appear in footer)
+        # 0106869738: VNPT
+        ignore_mst = ['0106869738', '0100684378', '0101245171']
+        
+        # Priority 1: Contextual match near "Đơn vị bán" or "Seller"
+        # Search in a window of text
+        seller_block_match = re.search(r'(?:Đơn vị bán|Người bán|Seller)[^:]*[:\s]+(.*?)(?:Mã số thuế|MST|Tax code)[^:]*[:\s]*([0-9\s-]+)', full_text, re.IGNORECASE | re.DOTALL)
+        if seller_block_match:
+             potential_mst = seller_block_match.group(2).replace(' ', '').strip()
+             # Check if it's a valid length MST
+             if len(potential_mst) >= 10 and not any(x in potential_mst for x in ignore_mst):
+                 data["Mã số thuế"] = potential_mst
+        else:
+             pass
+
+        # Priority 2: Standard MST search if Priority 1 failed found nothing or ignored
+        if not data["Mã số thuế"]:
+            # Find ALL MSTs, then filter
+            # Matches: "Mã số thuế: 030...", "MST: 030...", "Tax code: 030..."
+            # Also handles spaced MST: "0 3 0 ..."
+            all_mst_matches = re.finditer(r'(?:Mã số thuế|MST|Tax code)[^:]*[:\s]*([0-9\s-]+)', full_text, re.IGNORECASE)
+            
+            candidates = []
+            for m in all_mst_matches:
+                raw_mst = m.group(1).replace(' ', '').strip()
+                # Clean trailing chars usually adhering to MST like -001 or just junk
+                # Valid MST is usually 10-14 digits/chars
+                clean_mst = re.match(r'[\d-]+', raw_mst)
+                if clean_mst:
+                    val = clean_mst.group(0)
+                    # Check against ignore list: if ANY ignore_mst is a substring of val, OR val is substring of ignore_mst
+                    is_ignored = any(ign in val for ign in ignore_mst) or any(val in ign for ign in ignore_mst)
+                    
+                    if 9 <= len(val) <= 14 and not is_ignored:
+                         candidates.append(val)
+            
+            if candidates:
+                # If multiple candidates, usually the FIRST one is the seller (top of page), 
+                # unless the provider stamp is at the very top. 
+                # But typically Seller info is top-left or top-center.
+                data["Mã số thuế"] = candidates[0]
         
         # INVOICE NUMBER - Multiple patterns (order matters - more specific first)
         inv_patterns = [
@@ -907,8 +961,11 @@ def extract_invoice_data(pdf_source, filename=None):
                     cleaned_matches.append(clean)
             tax_codes.extend(cleaned_matches)
         
-        if len(tax_codes) >= 1:
-            data["Mã số thuế"] = tax_codes[0]  # Seller's tax code (first one)
+        if len(tax_codes) >= 1 and not data["Mã số thuế"]:
+             # Filter ignore list
+             valid_mst = [t for t in tax_codes if not any(ign in t for ign in ignore_mst) and not any(t in ign for ign in ignore_mst)]
+             if valid_mst:
+                 data["Mã số thuế"] = valid_mst[0]  # Seller's tax code (first one)
         
         # CQT CODE - Multiple patterns (include soft hyphen \u00AD used in some PDFs)
         cqt_patterns = [
@@ -1320,6 +1377,12 @@ def extract_invoice_data(pdf_source, filename=None):
              code_match = re.search(r'(?:nhập mã|provided code).*?([a-f0-9]{30,})', full_text, re.IGNORECASE)
              if code_match:
                  data["Mã tra cứu"] = code_match.group(1)
+             
+             # Additional Lookup Code Pattern (PC-...)
+             # Example: PC-260107070845-3863477
+             pc_match = re.search(r'Mã tra cứu[:\s]*([A-Z0-9-]+)', full_text, re.IGNORECASE)
+             if pc_match:
+                 data["Mã tra cứu"] = pc_match.group(1)
         
         # FINAL: If Tax Rate found (e.g. "Thuế khác": "10") but Column Empty, fill it
         # This fixes 0318...pdf where "Thuế khác" picked up "10" but didn't fill "Thuế 10%"

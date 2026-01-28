@@ -23,7 +23,6 @@ st.set_page_config(page_title="Invoice Extractor", page_icon="🧾", layout="wid
 
 # Category options for dropdown
 CATEGORY_OPTIONS = [
-    "Tự động nhận diện",
     "Dịch vụ ăn uống",
     "Dịch vụ phòng nghỉ", 
     "Hoa tươi",
@@ -203,10 +202,17 @@ else:
         # === STEP 3: FILE UPLOAD ===
         st.markdown("### 📂 Bước 3: Tải hóa đơn (PDF)")
         
+        # Check if required inputs are filled
+        can_upload = bool(team_input.strip()) and bool(employee_input.strip())
+        
+        if not can_upload:
+            st.warning("⚠️ Vui lòng nhập **Team** và **Tên nhân viên** trước khi tải file!")
+        
         uploaded_files = st.file_uploader(
             "Kéo thả hoặc chọn nhiều file PDF vào đây", 
             type="pdf", 
-            accept_multiple_files=True
+            accept_multiple_files=True,
+            disabled=not can_upload
         )
 
         if uploaded_files:
@@ -214,16 +220,7 @@ else:
             st.markdown("### ⚙️ Bước 4: Xử lý dữ liệu")
             st.write(f"Đã chọn **{len(uploaded_files)}** file.")
             
-            # Validation
-            can_process = True
-            if not team_input.strip():
-                st.warning("⚠️ Vui lòng nhập **Team** trước khi xử lý!")
-                can_process = False
-            if not employee_input.strip():
-                st.warning("⚠️ Vui lòng nhập **Tên nhân viên** trước khi xử lý!")
-                can_process = False
-            
-            if can_process and st.button("🚀 Bắt đầu trích xuất dữ liệu", type="primary"):
+            if st.button("🚀 Bắt đầu trích xuất dữ liệu", type="primary"):
                 logger.info(f"--- ACTION: User {current_user} started processing {len(uploaded_files)} files ---")
                 
                 progress_bar = st.progress(0)
@@ -242,15 +239,8 @@ else:
                         # Determine classification
                         if category_select == "Khác (Nhập tay)" and custom_category.strip():
                             final_category = custom_category.strip()
-                        elif category_select != "Tự động nhận diện":
-                            final_category = category_select
                         else:
-                            # Auto-detect
-                            if line_items:
-                                all_item_names = " ".join([item.get("name", "") for item in line_items])
-                                final_category = classify_content(all_item_names, data.get("Đơn vị bán", ""))
-                            else:
-                                final_category = "Khác"
+                            final_category = category_select
                         
                         # Determine tax rate(s)
                         tax_rates = []

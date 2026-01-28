@@ -16,7 +16,7 @@ CATEGORY_KEYWORDS = {
         "đậu", "trứng", "lươn", "hàu", "khô mực", "khăn lạnh", "hủ tiếu", "baba",
         "bồ câu", "chả", "dừa", "khoáng", "suối", "sả", "rượu", "coffee", "cafe",
         "katinat", "highlands", "starbucks", "phúc long", "trung nguyên", "golden gate",
-        "pizza", "kfc", "lotteria", "jollibee", "mcdonald", "domino"
+        "pizza", "kfc", "lotteria", "jollibee", "mcdonald", "domino","Xa lach rau mam"
     ],
     "Dịch vụ phòng nghỉ": [
         "thuê phòng", "phòng số", "cho thuê phòng", "phòng họp", "meeting room",

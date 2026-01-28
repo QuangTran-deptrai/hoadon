@@ -715,7 +715,9 @@ def extract_invoice_data(pdf_source, filename=None):
             r'(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})',
             # Multiline date matching with flexible noise skipping
             # Allows up to 100 chars of any text (including newlines) between parts
-            r'Ngày[:\s]*(\d{1,2})[\s\S]{0,100}tháng[:\s]*(\d{1,2})[\s\S]{0,100}năm[:\s]*(\d{4})'
+            r'Ngày[:\s]*(\d{1,2})[\s\S]{0,100}tháng[:\s]*(\d{1,2})[\s\S]{0,100}năm[:\s]*(\d{4})',
+            # Bilingual Date: Ngày (day) 19 tháng (month) 12 năm (year) 2025
+            r'Ngày(?:[^0-9]{0,35})?(\d{1,2})[\s\S]{0,35}tháng(?:[^0-9]{0,35})?(\d{1,2})[\s\S]{0,35}năm(?:[^0-9]{0,35})?(\d{4})'
         ]
         
         # Pre-process text for multiline date matching: remove newlines around Date keywords

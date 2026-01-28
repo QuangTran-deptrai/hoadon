@@ -2,10 +2,22 @@ import streamlit as st
 import pandas as pd
 import io
 import os
+import logging
+import sys
 from extract_invoices import extract_invoice_data, classify_content
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
+
+# Configure logging to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Configure page - MUST be the first Streamlit command
 st.set_page_config(page_title="Invoice Extractor", page_icon="🧾", layout="wide")
@@ -22,7 +34,7 @@ if "user_name" not in st.session_state:
     if st.button("Bắt đầu làm việc"):
         if name_input.strip():
             st.session_state["user_name"] = name_input.strip()
-            print(f"--- USER LOGIN: {st.session_state['user_name']} ---") # Log to console for Streamlit Cloud
+            logger.info(f"--- USER LOGIN: {st.session_state['user_name']} ---")
             st.rerun()
         else:
             st.warning("Vui lòng nhập tên để tiếp tục!")
@@ -35,7 +47,7 @@ else:
     with st.sidebar:
         st.write(f"👤 Đang làm việc: **{current_user}**")
         if st.button("Đăng xuất"):
-            print(f"--- USER LOGOUT: {current_user} ---")
+            logger.info(f"--- USER LOGOUT: {current_user} ---")
             del st.session_state["user_name"]
             st.rerun()
 
@@ -49,7 +61,7 @@ else:
     if uploaded_files:
         if st.button(f"Process {len(uploaded_files)} Invoices"):
             # Log action
-            print(f"--- ACTION: User {current_user} started processing {len(uploaded_files)} files ---")
+            logger.info(f"--- ACTION: User {current_user} started processing {len(uploaded_files)} files ---")
             
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -73,7 +85,7 @@ else:
                 all_rows.append(data)
             
             status_text.text("Processing complete!")
-            print(f"--- COMPLETION: User {current_user} finished processing ---")
+            logger.info(f"--- COMPLETION: User {current_user} finished processing ---")
             
             # Create DataFrame
             df = pd.DataFrame(all_rows)

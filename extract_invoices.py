@@ -7,6 +7,19 @@ import ast  # Added for parsing dict strings
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
+# OCR imports (optional - for scanned PDFs)
+OCR_AVAILABLE = False
+try:
+    import pytesseract
+    from pdf2image import convert_from_path
+    from PIL import Image
+    OCR_AVAILABLE = True
+    # Configure Tesseract path (Windows)
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    POPPLER_PATH = r"d:\hoadon\poppler-24.08.0\Library\bin"
+except ImportError:
+    pass  # OCR not available, will skip scanned PDFs
+
 # Category mapping based on extracted services
 CATEGORY_KEYWORDS = {
     "Dịch vụ ăn uống": [
@@ -163,6 +176,150 @@ def parse_vietnamese_number(value):
         return float(str(value).replace('.', '').replace(',', '.'))
     except (ValueError, TypeError):
         return 0
+
+
+def ocr_pdf_to_text(pdf_source, filename=None):
+    """
+    Use OCR to extract text from scanned PDF.
+    Returns extracted text or empty string if OCR fails.
+    """
+    if not OCR_AVAILABLE:
+        print("  OCR not available (pytesseract/pdf2image not installed)")
+        return ""
+    
+    try:
+        # Convert PDF to images
+        if isinstance(pdf_source, str):
+            images = convert_from_path(pdf_source, dpi=300, poppler_path=POPPLER_PATH)
+        else:
+            # For BytesIO, need to save to temp file first
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                tmp.write(pdf_source.read())
+                tmp_path = tmp.name
+            pdf_source.seek(0)  # Reset stream
+            images = convert_from_path(tmp_path, dpi=300, poppler_path=POPPLER_PATH)
+            os.unlink(tmp_path)  # Clean up
+        
+        # OCR each page
+        full_text = ""
+        for i, image in enumerate(images):
+            text = pytesseract.image_to_string(image, lang='vie+eng')
+            full_text += text + "\n"
+        
+        return full_text
+    except Exception as e:
+        print(f"  OCR error: {e}")
+        return ""
+
+
+def extract_ocr_invoice_fields(text, filename=None):
+    """Extract invoice fields from OCR text (simpler patterns for OCR quality)."""
+    data = {}
+    
+    # Ký hiệu
+    serial_match = re.search(r'[Kk]ý\s*hiệu[:\s]*([A-Z0-9]+)', text)
+    if serial_match:
+        data["Ký hiệu"] = serial_match.group(1)
+    
+    # Số hóa đơn - multiple patterns
+    inv_patterns = [
+        r'[Ss][oố]\s*hóa\s*đơn[:\s]+(\d{5,})',
+        r'[Ss]ố\s*(?:HĐ)[:\s]*(\d+)',
+        r'[Ss][oố][:\s]+(\d{6,})',
+        r'[Nn]o\.?[:\s]*(\d{5,})',
+        r'[Ii]nvoice\s*[Nn]o\.?[:\s]*(\d+)',
+    ]
+    for p in inv_patterns:
+        m = re.search(p, text)
+        if m:
+            num = m.group(1)
+            if not re.match(r'^(18|19|09|08|07|06|05|03|02|01)\d{6,}', num):
+                data["Số hóa đơn"] = num
+                break
+    
+    # Fallback: from filename
+    if "Số hóa đơn" not in data and filename:
+        fn_match = re.search(r'_(\d{5,})', filename)
+        if fn_match:
+            data["Số hóa đơn"] = fn_match.group(1)
+    
+    # Ngày hóa đơn
+    date_match = re.search(r'[Nn]gày\s*(\d{1,2})\s*tháng\s*(\d{1,2})\s*năm\s*(\d{4})', text)
+    if date_match:
+        data["Ngày hóa đơn"] = f"{date_match.group(1)}/{date_match.group(2)}/{date_match.group(3)}"
+    else:
+        date_match2 = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', text)
+        if date_match2:
+            data["Ngày hóa đơn"] = f"{date_match2.group(1)}/{date_match2.group(2)}/{date_match2.group(3)}"
+    
+    # MST bên bán
+    mst_patterns = [
+        r'[Mm]a\s*số\s*thuế[:\s]*(\d{10,14})',
+        r'MST[:\s]*(\d{10,14})',
+        r'[Mm]ã\s*số\s*thuế[:\s]*(\d{10,14})',
+    ]
+    for p in mst_patterns:
+        m = re.search(p, text)
+        if m:
+            data["Mã số thuế"] = m.group(1)
+            break
+    
+    # Số tiền trước thuế
+    before_patterns = [
+        r'[Cc]ộng\s*tiền\s*hàng[:\s]*([\d\.,]+)',
+        r'ông\s*tiên\s*hang[:\s]*([\d\.,]+)',
+        r'[Tt]iền\s*hàng[:\s]*([\d\.,]+)',
+    ]
+    for p in before_patterns:
+        m = re.search(p, text)
+        if m:
+            data["Số tiền trước Thuế"] = m.group(1)
+            break
+    
+    # VAT
+    vat_patterns = [
+        r'[Tt]iền\s*thuế\s*GTGT[:\s]*([\d\.,]+)',
+        r'[Cc]XC[:\s]*([\d\.,]+)',
+        r'thuế\s*GTGT[:\s]*([\d\.,]+)',
+        r'ién\s*thuê\s*GTGT[:\s]*\(?\s*\d+\s*%?\s*\)?\s*([\d\.,]+)',
+    ]
+    for p in vat_patterns:
+        m = re.search(p, text)
+        if m:
+            data["Tiền thuế"] = m.group(1)
+            break
+    
+    # Tax rate detection
+    if re.search(r'8\s*%', text):
+        data["Thuế 8%"] = data.get("Tiền thuế", "")
+    elif re.search(r'10\s*%', text):
+        data["Thuế 10%"] = data.get("Tiền thuế", "")
+    
+    # Tổng tiền sau thuế
+    total_patterns = [
+        r'[Tt]ổng\s*(?:cộng|tiền)\s*thanh\s*toán[:\s]*([\d\.,]+)',
+        r'[Ff]e\s*[Pp]er\s*0\s*[Tt]ana[:\s]*([\d\.,]+)',
+        r'[Tt]ổng\s*(?:cộng|tiền)[:\s]*([\d\.,]+)',
+        r'(\d{1,3}(?:[.,]\d{3})+)\s*đồng',
+    ]
+    for p in total_patterns:
+        m = re.search(p, text)
+        if m:
+            data["Số tiền sau"] = m.group(1)
+            break
+    
+    # Mã tra cứu
+    lookup_match = re.search(r'[Mm]ã\s*tra\s*cứu[:\s]*([A-Z0-9*]+)', text)
+    if lookup_match:
+        data["Mã tra cứu"] = lookup_match.group(1)
+    
+    # Link
+    link_match = re.search(r'(https?://[^\s]+)', text)
+    if link_match:
+        data["Link lấy hóa đơn"] = link_match.group(1)
+    
+    return data
 
 
 def extract_services_from_text(full_text):
@@ -624,6 +781,24 @@ def extract_invoice_data(pdf_source, filename=None):
                 page_text = page.extract_text()
                 if page_text:
                     full_text += page_text + "\n"
+        
+        # Check if PDF is scanned (no text extracted)
+        if not full_text.strip():
+            print(f"  PDF has no text, trying OCR: {filename}")
+            ocr_text = ocr_pdf_to_text(pdf_source, filename)
+            if ocr_text.strip():
+                # Use OCR extraction for scanned PDFs
+                ocr_data = extract_ocr_invoice_fields(ocr_text, filename)
+                for key, val in ocr_data.items():
+                    if key in data and val:
+                        data[key] = val
+                # Auto-classify as Xăng xe if Petrolimex
+                if "petrolimex" in ocr_text.lower():
+                    data["Phân loại"] = "Xăng xe"
+                return data, []  # Return early for OCR path
+            else:
+                print(f"  OCR also failed for: {filename}")
+                return data, []
         
         # Normalize newlines
         full_text = full_text.replace('\r\n', '\n').replace('\r', '\n')

@@ -6,6 +6,11 @@ invoices_input/
 pdf_texts/
 debug_*.txt
 verify_app_logic.py
+test_*.py
+ocr_invoice.py
+
+# Poppler (OCR dependency - too large)
+poppler-*/
 
 # Build artifacts
 dist/

@@ -257,26 +257,64 @@ else:
                     }
                     
                     # Handle multi-rate invoices
+                    # Helper function to parse money string
+                    def parse_money_str(s):
+                        if not s or pd.isna(s):
+                            return 0
+                        s = str(s).strip().replace(',', '').replace('.', '')
+                        try:
+                            return int(s)
+                        except:
+                            return 0
+                    
+                    # Helper function to calculate amounts per tax rate
+                    def calc_amounts_for_rate(vat_amount, rate_str):
+                        """Calculate before-VAT and total from VAT amount and rate"""
+                        vat_val = parse_money_str(vat_amount)
+                        rate_map = {"0%": 0, "5%": 0.05, "8%": 0.08, "10%": 0.10}
+                        rate = rate_map.get(rate_str, 0)
+                        
+                        if vat_val and rate > 0:
+                            before_vat = int(vat_val / rate)
+                            total = before_vat + vat_val
+                            return before_vat, vat_val, total
+                        elif vat_val:
+                            return 0, vat_val, vat_val
+                        return 0, 0, 0
+                    
                     if len(tax_rates) == 1:
                         # Single rate - simple case
                         rate = tax_rates[0]
                         if rate == "N/A":
                             base_row["VAT"] = data.get("Tiền thuế", "")
                             base_row["Thuế suất"] = ""
+                            # Keep original totals for N/A
                         else:
-                            base_row["VAT"] = data.get(f"Thuế {rate}", data.get("Tiền thuế", ""))
+                            vat_str = data.get(f"Thuế {rate}", data.get("Tiền thuế", ""))
+                            before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
+                            base_row["VAT"] = vat_val if vat_val else vat_str
                             base_row["Thuế suất"] = rate
+                            if before_vat:
+                                base_row["Số tiền trước VAT"] = before_vat
+                            if total:
+                                base_row["Tổng tiền sau thuế"] = total
                         all_rows.append(base_row)
                     else:
-                        # Multiple rates - create multiple rows
+                        # Multiple rates - create multiple rows with calculated amounts
                         for rate in tax_rates:
                             row = base_row.copy()
                             if rate == "Khác":
                                 row["VAT"] = data.get("Thuế khác", "")
                                 row["Thuế suất"] = "Khác"
                             else:
-                                row["VAT"] = data.get(f"Thuế {rate}", "")
+                                vat_str = data.get(f"Thuế {rate}", "")
+                                before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
+                                row["VAT"] = vat_val if vat_val else vat_str
                                 row["Thuế suất"] = rate
+                                if before_vat:
+                                    row["Số tiền trước VAT"] = before_vat
+                                if total:
+                                    row["Tổng tiền sau thuế"] = total
                             all_rows.append(row)
                     
                 except Exception as e:

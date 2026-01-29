@@ -292,33 +292,32 @@ def extract_ocr_invoice_fields(text, filename=None):
             data["Mã số thuế"] = m.group(1)
             break
     
-    # Số tiền trước thuế (Petrolimex specific patterns)
+    # Số tiền trước thuế (Petrolimex specific patterns from cloud OCR)
     before_patterns = [
+        r'ông\s*tiên\s*hàng[:\s]*([\d\.,]+)',        # "ông tiên hàng: 462.963"
+        r'ông\s*tiên\s*hang[:\s]*([\d\.,]+)',        # "ông tiên hang: 481.787"
         r'[Cc]ộng\s*tiền\s*hàng[:\s]*([\d\.,]+)',
-        r'ông\s*tiên\s*hang[:\s]*([\d\.,]+)',       # OCR typo: Cộng tiền hàng
-        r'ông\s*tiền\s*hàng[:\s]*([\d\.,]+)',       # OCR typo variant
         r'[Tt]iền\s*hàng[:\s]*([\d\.,]+)',
-        # Petrolimex: Look for amount before VAT line
-        r'([\d\.,]{5,})\s*(?:à\s*)?[Pp]etro',       # "481.787à PetroVietnam"
-        r'hang[:\s]*([\d\.,]+)',                    # "tiên hang: 462.963"
     ]
     for p in before_patterns:
         m = re.search(p, text)
         if m:
             val = m.group(1).strip()
-            # Skip if looks like year (2025, 2026)
-            if not re.match(r'^20[0-9]{2}$', val):
+            # Skip if looks like year (2025, 2026) or too short
+            if not re.match(r'^20[0-9]{2}$', val) and len(val) >= 3:
                 data["Số tiền trước Thuế"] = val
                 break
     
-    # VAT (Petrolimex specific)
+    # VAT (Petrolimex specific - from cloud OCR)
+    # Pattern: "lên thuê GTGT (8% ) 38.543" or "lên thuê GTGT ( 8% )"
     vat_patterns = [
+        r'lên\s*thuê\s*GTGT\s*\(\s*\d+\s*%?\s*\)\s*([\d\.,]+)',   # "lên thuê GTGT (8% ) 38.543"
+        r'ién\s*thuê\s*GTGT\s*\(\s*\d+\s*%?\s*\)\s*([\d\.,]+)',   # OCR variant
         r'[Tt]iền\s*thuế\s*GTGT[:\s]*([\d\.,]+)',
-        r'ién\s*thuê\s*GTGT[:\s]*\(?\s*\d+\s*%?\s*\)?\s*([\d\.,]+)',  # OCR typo
-        r'thuê\s*GTGT\s*\(?\s*8\s*%?\s*\)?\s*([\d\.,]+)',             # thuê GTGT (8%) 38.543
-        r'[Cc]XC[:\s]*([\d\.,]+)',                                    # "a CXC 37.087"
+        r'thuê\s*GTGT\s*\(\s*8\s*%?\s*\)\s*([\d\.,]+)',
+        r'GTGT\s*\(\s*\d+\s*%?\s*\)\s*([\d\.,]+)',
+        r'[Cc]XC[:\s]*([\d\.,]+)',
         r'thuế\s*GTGT[:\s]*([\d\.,]+)',
-        r'GTGT\s*\(?\s*\d+\s*%?\s*\)?\s*([\d\.,]+)',                 # GTGT (8%) 38.543
     ]
     for p in vat_patterns:
         m = re.search(p, text)
@@ -336,23 +335,19 @@ def extract_ocr_invoice_fields(text, filename=None):
     elif re.search(r'10\s*%', text):
         data["Thuế 10%"] = data.get("Tiền thuế", "")
     
-    # Tổng tiền sau thuế (Petrolimex specific)
+    # Tổng tiền sau thuế (Petrolimex specific - from cloud OCR)
+    # Pattern: "ông sô tiên thanh toán: 800.083"
     total_patterns = [
+        r'ông\s*sô\s*tiên\s*thanh\s*toán[:\s]*([\d\.,]+)',        # "ông sô tiên thanh toán: 800.083"
         r'[Tt]ổng\s*(?:số\s*)?(?:cộng|tiền)\s*thanh\s*toán[:\s]*([\d\.,]+)',
-        r'ông\s*sô\s*tiên\s*thanh\s*toán[:\s]*([\d\.,]+)',  # OCR typo
-        r'[Ff]e\s*[Pp]er\s*0\s*[Tt]ana[:\s]*([\d\.,]+)',    # OCR typo: "Fe Per 0 Tana"
-        r'[Tt]ổng\s*(?:cộng|tiền)[:\s]*([\d\.,]+)',
         r'thanh\s*toán[:\s]*([\d\.,]+)',
-        # Match "Năm trăm nghìn đồng" pattern - extract preceding number
-        r'([\d\.,]{6,})\s*[Tt]ổng\s*số\s*tiền',
-        # Fallback: any 6-digit number ending with ,000
-        r'(\d{2,3}[.,]\d{3})\s*(?:đồng|VND)',
+        r'[Tt]ổng\s*(?:cộng|tiền)[:\s]*([\d\.,]+)',
     ]
     for p in total_patterns:
         m = re.search(p, text)
         if m:
             val = m.group(1).strip()
-            if not re.match(r'^20[0-9]{2}$', val):
+            if not re.match(r'^20[0-9]{2}$', val) and len(val) >= 3:
                 data["Số tiền sau"] = val
                 break
     

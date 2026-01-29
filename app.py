@@ -261,7 +261,16 @@ else:
                     def parse_money_str(s):
                         if not s or pd.isna(s):
                             return 0
-                        s = str(s).strip().replace(',', '').replace('.', '')
+                        s = str(s).strip()
+                        # Robust decimal handling: check order of separators
+                        if '.' in s and ',' in s:
+                            if s.rfind(',') > s.rfind('.'):
+                                s = s[:s.rfind(',')]  # Cut decimal part
+                            else:
+                                s = s[:s.rfind('.')]
+                        elif re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
+                            s = s[:-3]  # Remove 2-digit decimal suffix
+                        s = s.replace(',', '').replace('.', '')
                         try:
                             return int(s)
                         except:
@@ -275,7 +284,7 @@ else:
                         rate = rate_map.get(rate_str, 0)
                         
                         if vat_val and rate > 0:
-                            before_vat = int(vat_val / rate)
+                            before_vat = int(round(vat_val / rate))
                             total = before_vat + vat_val
                             return before_vat, vat_val, total
                         elif vat_val:

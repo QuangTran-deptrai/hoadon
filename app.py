@@ -136,30 +136,8 @@ if st.session_state["processing_complete"] and st.session_state["processed_df"] 
                     start_row = excel_row
                     current_team = cell_value
         
-        # Second: Merge money columns by filename (column M = 13)
-        if len(df) > 1:
-            start_row = 2  # Excel row 2 (after header)
-            current_file = worksheet.cell(row=2, column=13).value
-            
-            for excel_row in range(3, worksheet.max_row + 2):  # +2 to include last row check
-                if excel_row > worksheet.max_row:
-                    cell_value = None
-                else:
-                    cell_value = worksheet.cell(row=excel_row, column=13).value
-                
-                if cell_value != current_file:
-                    # End of group - merge if group size > 1
-                    end_row = excel_row - 1
-                    if end_row > start_row:
-                        for col_idx in merge_by_file_cols:
-                            col_letter = get_column_letter(col_idx)
-                            worksheet.merge_cells(f"{col_letter}{start_row}:{col_letter}{end_row}")
-                            # Set alignment for merged cell
-                            top_cell = worksheet.cell(row=start_row, column=col_idx)
-                            top_cell.alignment = Alignment(horizontal="right", vertical="center")
-                    
-                    start_row = excel_row
-                    current_file = cell_value
+        # NOTE: Money columns (H, I, K) are NO LONGER merged
+        # Each row shows its own tax rate and amount for clarity
 
     output.seek(0)
     

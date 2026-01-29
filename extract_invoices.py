@@ -97,24 +97,27 @@ def format_price_value(value):
     # Remove any spaces
     value = value.strip()
     
-    # Check if it has Vietnamese decimal format (,00 or ,0 at end)
-    if ',' in value:
-        # Split by comma - left part is integer, right part is decimal
-        parts = value.rsplit(',', 1)
-        integer_part = parts[0]
-        # Ignore decimal part
-    else:
-        integer_part = value
-    
-    # Convert dots to nothing (remove thousands separator), then parse as integer
-    integer_part = integer_part.replace('.', '')
-    
+    # Use robust parse_money logic to handle both 1.234,56 and 1,234.56
+    # Instead of naive split, we strip non-numeric and parse
     try:
-        num = int(integer_part)
-        # Format with comma as thousands separator
-        return f"{num:,}"
-    except ValueError:
-        return value  # Return original if can't parse
+        # Check if it has decimal part like ,00 or .00 at end
+        s = value.strip()
+        import re
+        if '.' in s and ',' in s:
+            if s.rfind(',') > s.rfind('.'): # 1.234,56
+                s = s[:s.rfind(',')]
+            else: # 1,234.56
+                s = s[:s.rfind('.')]
+        elif re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
+             # 2 digit decimal suffix
+             s = s[:-3]
+             
+        # Now remove any remaining separators
+        clean = s.replace('.', '').replace(',', '')
+        num = int(clean)
+        return f"{num:,}" # Format with comma
+    except:
+        return value
 
 COMMON_UNITS = {
     "CÁI", "CHIẾC", "BỘ", "GÓI", "HỘP", "THÙNG", "BAO", "CHAI", "LON", "LÍT", "LIT", "KG", "GRAM", "GM", "MÉT", 

@@ -318,7 +318,11 @@ def extract_ocr_invoice_fields(text, filename=None):
             break
     
     # Tax rate detection (Petrolimex uses 8%)
-    if re.search(r'8\s*%', text):
+    # For gas stations, default to 8% VAT
+    if 'petrolimex' in text.lower() or 'xăng' in text.lower() or 'ron 95' in text.lower():
+        if data.get("Tiền thuế"):
+            data["Thuế 8%"] = data["Tiền thuế"]
+    elif re.search(r'8\s*%', text):
         data["Thuế 8%"] = data.get("Tiền thuế", "")
     elif re.search(r'10\s*%', text):
         data["Thuế 10%"] = data.get("Tiền thuế", "")

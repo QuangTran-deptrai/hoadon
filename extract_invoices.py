@@ -1495,14 +1495,12 @@ def extract_invoice_data(pdf_source, filename=None):
             before_tax = parse_money(data["Số tiền trước Thuế"])
             if total_tax and before_tax and before_tax > 0:
                 rate = round(total_tax / before_tax * 100)
-                if rate == 0:
-                    data["Thuế 0%"] = data["Tiền thuế"]
-                elif rate == 5:
-                    data["Thuế 5%"] = data["Tiền thuế"]
-                elif rate == 8:
-                    data["Thuế 8%"] = data["Tiền thuế"]
-                elif rate == 10:
-                    data["Thuế 10%"] = data["Tiền thuế"]
+                if rate in [0, 5, 8, 10]:
+                    key = f"Thuế {rate}%"
+                    # Calculate implicitly to ensure correct rounding if we are filling it
+                    # But here we just move Total Tax to the bucket.
+                    # However, if we ever needed to recalculate Pre-Tax, we need consistent logic.
+                    data[key] = data["Tiền thuế"]
                 else:
                     data["Thuế khác"] = data["Tiền thuế"]
         

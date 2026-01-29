@@ -357,9 +357,18 @@ def extract_ocr_invoice_fields(text, filename=None):
         if not s:
             return 0
         s = str(s).strip()
-        # Handle decimal suffix (like ,00 or .00)
-        if re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
-             s = s[:-3]
+        # Robust Logic: Check order of separators if both exist
+        if '.' in s and ',' in s:
+            last_dot = s.rfind('.')
+            last_comma = s.rfind(',')
+            if last_comma > last_dot: # 1.234,56 -> , is decimal
+                s = s[:last_comma]
+            else: # 1,234.56 -> . is decimal
+                s = s[:last_dot]
+        else:
+            # Only one separator type
+            if re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
+                 s = s[:-3]
         s = s.replace(',', '').replace('.', '')
         try:
             return int(s)
@@ -848,16 +857,39 @@ def extract_invoice_data(pdf_source, filename=None):
             return 0
         s = str(s).strip()
         
-        # Handle decimal suffix (like ,00 or .00)
-        # Only remove if it looks like a decimal (2 digits) and NOT thousands (3 digits)
-        if re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
-             s = s[:-3]
+        # Robust Logic: Check order of separators if both exist
+        if '.' in s and ',' in s:
+            last_dot = s.rfind('.')
+            last_comma = s.rfind(',')
+            if last_comma > last_dot: # 1.234,56 -> , is decimal
+                s = s[:last_comma]
+            else: # 1,234.56 -> . is decimal
+                s = s[:last_dot]
+        else:
+            # Only one separator type
+            # Case: 1.820.000 -> Integer
+            # Case: 50,05 (decimal)
+            # Logic: If ends with 2 digits decimal suffix -> remove
+            if re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
+                 s = s[:-3]
              
         s = s.replace(',', '').replace('.', '')
         try:
             return int(s)
         except:
             return 0
+            
+    def format_money(n):
+        """Format number back to string with dots as thousands separator"""
+        if n is None: return ""
+        if isinstance(n, str) and not n.strip(): return ""
+        try:
+             # Use our robust parse_money to get float/int
+             val = parse_money(n)
+             return f"{val:,.0f}".replace(',', '.')
+        except:
+             return str(n)
+             
     if isinstance(pdf_source, str):
         filename = os.path.basename(pdf_source)
     elif filename is None:
@@ -1894,6 +1926,21 @@ def extract_invoice_data(pdf_source, filename=None):
          tax_num = parse_money(data.get("Tiền thuế"))
          if v_num and (v_num == t_num or v_num == tax_num):
               data["Thuế khác"] = ""
+
+    # FINAL MONEY CLEANUP: Ensure all money fields are properly formatted and decimal suffixes removed
+    money_keys = ["Số tiền trước Thuế", "Tiền thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác", "Số tiền sau"]
+    for k in money_keys:
+        if k in data and data[k]:
+             orig = data[k]
+             # print(f"[DEBUG CLEANUP] Key: {k}, Orig: '{orig}'")
+             val = parse_money(data[k])
+             # print(f"    -> Parsed: {val}")
+             
+             if val != 0:
+                 data[k] = format_money(val)
+                 # print(f"    -> Formatted: '{data[k]}'")
+             elif val == 0 and data[k] not in ["0", "0.0", "0,0"]:
+                 pass
 
     return data, line_items
 

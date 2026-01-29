@@ -391,7 +391,7 @@ def extract_ocr_invoice_fields(text, filename=None):
     
     # If missing total but have before_tax (assume 8% VAT for Petrolimex)
     elif not total and before_tax and 'petrolimex' in text.lower():
-        vat = int(before_tax * 0.08)
+        vat = int(round(before_tax * 0.08))
         total = before_tax + vat
         data["Số tiền sau"] = format_money(total)
         data["Tiền thuế"] = format_money(vat)
@@ -400,7 +400,7 @@ def extract_ocr_invoice_fields(text, filename=None):
     
     # If missing before_tax but have total (assume 8% VAT for Petrolimex)
     elif not before_tax and total and 'petrolimex' in text.lower():
-        before_tax = int(total / 1.08)
+        before_tax = int(round(total / 1.08))
         vat = total - before_tax
         data["Số tiền trước Thuế"] = format_money(before_tax)
         if not data.get("Tiền thuế"):
@@ -1809,7 +1809,7 @@ def extract_invoice_data(pdf_source, filename=None):
                     rate = int(data["Thuế khác"])
                     pre = parse_money(data["Số tiền trước Thuế"])
                     if pre:
-                        calc_tax = pre * rate / 100
+                        calc_tax = int(round(pre * rate / 100))
                         data[rate_key] = format_money(calc_tax)
                         if not data["Tiền thuế"]:
                              data["Tiền thuế"] = format_money(calc_tax)
@@ -1852,6 +1852,7 @@ def extract_invoice_data(pdf_source, filename=None):
             for item in line_items:
                 r_str = item.get('tax_rate')
                 amt_str = item.get('amount')
+                # print(f"  [DEBUG LOOP] Item Rate: '{r_str}', Amt: '{amt_str}'")
                 if r_str and amt_str:
                     try:
                         amt = parse_money(amt_str)
@@ -1860,10 +1861,11 @@ def extract_invoice_data(pdf_source, filename=None):
                         if r in tax_map:
                              # Calculate Tax = Amount * Rate / 100
                              # Note: This is an estimation. Ideally we parse the tax amount column too but that varies wildly in format.
-                             tax_val = int(amt * r / 100)
+                             tax_val = int(round(amt * r / 100))
                              tax_map[r] += tax_val
                              has_item_tax = True
-                    except:
+                    except Exception as e:
+                        # print(f"    [DEBUG ERROR] Item process failed: {e}")
                         pass
             
             if has_item_tax:
@@ -1873,7 +1875,13 @@ def extract_invoice_data(pdf_source, filename=None):
                     if tax_map[r] > 0:
                         # Only overwrite if empty or significantly different (likely better data from items than bad footer parse)
                         curr_val = parse_money(data[key])
-                        if curr_val == 0:
+                        diff = abs(curr_val - tax_map[r])
+                        
+                        # Overwrite strategy:
+                        # 1. If Curr is 0/Empty -> Overwrite
+                        # 2. If Diff is small (<= 5) -> Trust Calc (Fix rounding errors like 499,999 vs 500,000)
+                        # 3. If Diff is Huge (> 50% of Calc) -> Trust Calc (Fix Garbage regex capture)
+                        if curr_val == 0 or diff <= 5 or diff > tax_map[r] * 0.5:
                              data[key] = format_money(tax_map[r])
                              
                 # Recalculate Total Tax if it looks wrong or empty

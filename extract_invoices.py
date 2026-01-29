@@ -441,6 +441,12 @@ def extract_services_from_text(full_text):
             if not (is_surcharge_line and len(all_nums) == 2):
                 continue
         
+        # Detect Tax Rate explicitly (e.g. "8%", "10%")
+        tax_rate = None
+        rate_match = re.search(r'\b(0|5|8|10)\s*%', line)
+        if rate_match:
+            tax_rate = rate_match.group(1)
+        
         stt_end = len(match_start.group(0))
         
         # Strategy: Find the LAST UNIT word (from COMMON_UNITS) that is followed by numbers
@@ -819,7 +825,8 @@ def extract_services_from_text(full_text):
             "name": name_part,
             "qty": format_price_value(qty),
             "unit_price": format_price_value(unit_price),
-            "amount": format_price_value(amount)
+            "amount": format_price_value(amount),
+            "tax_rate": tax_rate
         })
 
     return services
@@ -830,6 +837,16 @@ def extract_invoice_data(pdf_source, filename=None):
     :param pdf_source: File path (str) or file-like object (BytesIO)
     :param filename: Original filename (if pdf_source is a stream)
     """
+    
+    def parse_money(s):
+        """Convert string like '481.787' or '481,787' to float"""
+        if not s:
+            return 0
+        s = str(s).replace(',', '').replace('.', '')
+        try:
+            return int(s)
+        except:
+            return 0
     if isinstance(pdf_source, str):
         filename = os.path.basename(pdf_source)
     elif filename is None:
@@ -1785,6 +1802,46 @@ def extract_invoice_data(pdf_source, filename=None):
                         else:
                              item[k] = val.replace("0'}", "").replace("'}'}", "").replace("'}", "").replace("{'", "").strip()
             
+            # Aggregate taxes from line items if detected (e.g. for invoices with no summary table)
+            tax_map = {0: 0, 5: 0, 8: 0, 10: 0}
+            has_item_tax = False
+            
+            for item in line_items:
+                r_str = item.get('tax_rate')
+                amt_str = item.get('amount')
+                if r_str and amt_str:
+                    try:
+                        amt = parse_money(amt_str)
+                        r = int(r_str)
+                        # print(f"    [DEBUG] Item Amount: {amt}, Rate: {r}")
+                        if r in tax_map:
+                             # Calculate Tax = Amount * Rate / 100
+                             # Note: This is an estimation. Ideally we parse the tax amount column too but that varies wildly in format.
+                             tax_val = int(amt * r / 100)
+                             tax_map[r] += tax_val
+                             has_item_tax = True
+                    except:
+                        pass
+            
+            if has_item_tax:
+                # Fill missing tax buckets
+                for r in [0, 5, 8, 10]:
+                    key = f"Thuế {r}%"
+                    if tax_map[r] > 0:
+                        # Only overwrite if empty or significantly different (likely better data from items than bad footer parse)
+                        curr_val = parse_money(data[key])
+                        if curr_val == 0:
+                             data[key] = format_money(tax_map[r])
+                             
+                # Recalculate Total Tax if it looks wrong or empty
+                total_item_tax = sum(tax_map.values())
+                curr_total_tax = parse_money(data["Tiền thuế"])
+                
+                # If total tax is missing or significantly smaller than item sum (e.g. captured only one rate), update it
+                if curr_total_tax == 0 or (total_item_tax > curr_total_tax and total_item_tax > 1000):
+                     data["Tiền thuế"] = format_money(total_item_tax)
+                     print(f"  [AUTO-AGGR] Aggregated Tax from items: {total_item_tax}")
+
             # FINAL CHECK: Sanity check Tax Amount (Run AFTER post-process updates)
             if data["Tiền thuế"] and (data["Số tiền trước Thuế"] or data["Số tiền sau"]):
                  try:

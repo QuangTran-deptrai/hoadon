@@ -235,6 +235,9 @@ def extract_ocr_invoice_fields(text, filename=None):
     """Extract invoice fields from OCR text (simpler patterns for OCR quality)."""
     data = {}
     
+    # Debug: print first 500 chars of OCR text
+    print(f"  OCR TEXT SAMPLE (first 500 chars): {text[:500]}")
+    
     # Ký hiệu
     serial_match = re.search(r'[Kk]ý\s*hiệu[:\s]*([A-Z0-9]+)', text)
     if serial_match:

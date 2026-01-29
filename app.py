@@ -239,8 +239,10 @@ else:
                     if category_select == "Khác (Nhập tay)" and custom_category.strip():
                         final_category = custom_category.strip()
                     elif category_select == "Tự động nhận diện":
-                        # Auto-detect based on invoice content
-                        if line_items:
+                        # First check if OCR already set a classification
+                        if data.get("Phân loại") and data.get("Phân loại") != "Khác":
+                            final_category = data.get("Phân loại")
+                        elif line_items:
                             all_item_names = " ".join([item.get("name", "") for item in line_items])
                             final_category = classify_content(all_item_names, data.get("Đơn vị bán", ""))
                         else:

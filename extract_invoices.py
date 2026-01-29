@@ -158,7 +158,23 @@ def parse_money(value):
     if not value:
         return None
     try:
-        clean = str(value).replace('.', '').replace(',', '')
+        s = str(value).strip()
+        
+        # Robust Logic: Check order of separators if both exist
+        if '.' in s and ',' in s:
+            last_dot = s.rfind('.')
+            last_comma = s.rfind(',')
+            if last_comma > last_dot:  # 1.234,56 -> , is decimal
+                s = s[:last_comma]
+            else:  # 1,234.56 -> . is decimal
+                s = s[:last_dot]
+        else:
+            # Only one separator type - check for 2-digit decimal suffix
+            import re
+            if re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
+                s = s[:-3]
+        
+        clean = s.replace('.', '').replace(',', '')
         return int(clean)
     except (ValueError, TypeError):
         return None

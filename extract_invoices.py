@@ -351,6 +351,50 @@ def extract_ocr_invoice_fields(text, filename=None):
                 data["Số tiền sau"] = val
                 break
     
+    # Auto-calculate missing values (for Petrolimex 8% VAT)
+    def parse_money(s):
+        """Convert string like '481.787' or '481,787' to float"""
+        if not s:
+            return 0
+        s = s.replace(',', '').replace('.', '')  # Remove separators
+        try:
+            return int(s)
+        except:
+            return 0
+    
+    def format_money(n):
+        """Format number back to string with dots as thousands separator"""
+        return f"{n:,.0f}".replace(',', '.')
+    
+    before_tax = parse_money(data.get("Số tiền trước Thuế", ""))
+    vat = parse_money(data.get("Tiền thuế", ""))
+    total = parse_money(data.get("Số tiền sau", ""))
+    
+    # If missing total but have before_tax and vat, calculate
+    if not total and before_tax and vat:
+        total = before_tax + vat
+        data["Số tiền sau"] = format_money(total)
+        print(f"  [AUTO-CALC] Total = {before_tax} + {vat} = {total}")
+    
+    # If missing total but have before_tax (assume 8% VAT for Petrolimex)
+    elif not total and before_tax and 'petrolimex' in text.lower():
+        vat = int(before_tax * 0.08)
+        total = before_tax + vat
+        data["Số tiền sau"] = format_money(total)
+        data["Tiền thuế"] = format_money(vat)
+        data["Thuế 8%"] = format_money(vat)
+        print(f"  [AUTO-CALC] VAT 8% = {vat}, Total = {total}")
+    
+    # If missing before_tax but have total (assume 8% VAT for Petrolimex)
+    elif not before_tax and total and 'petrolimex' in text.lower():
+        before_tax = int(total / 1.08)
+        vat = total - before_tax
+        data["Số tiền trước Thuế"] = format_money(before_tax)
+        if not data.get("Tiền thuế"):
+            data["Tiền thuế"] = format_money(vat)
+            data["Thuế 8%"] = format_money(vat)
+        print(f"  [AUTO-CALC] Before tax = {before_tax}, VAT = {vat}")
+    
     # Mã tra cứu
     lookup_match = re.search(r'[Mm]ã\s*tra\s*cứu[:\s]*([A-Z0-9*]+)', text)
     if lookup_match:

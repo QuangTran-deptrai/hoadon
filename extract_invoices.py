@@ -832,14 +832,18 @@ def extract_invoice_data(pdf_source, filename=None):
                         data[key] = val
                 # Auto-classify based on content
                 ocr_lower = ocr_text.lower()
+                print(f"  OCR text contains 'petrolimex': {'petrolimex' in ocr_lower}")
+                print(f"  OCR text contains 'xăng': {'xăng' in ocr_lower}")
                 if any(x in ocr_lower for x in ['petrolimex', 'xăng', 'ron 95', 'ron95', 'diesel', 'dầu diesel']):
                     data["Phân loại"] = "Xăng xe"
+                    print(f"  Classification set to: Xăng xe")
                 elif any(x in ocr_lower for x in ['khách sạn', 'hotel', 'phòng nghỉ']):
                     data["Phân loại"] = "Dịch vụ phòng nghỉ"
                 elif any(x in ocr_lower for x in ['nhà hàng', 'quán ăn', 'món ăn']):
                     data["Phân loại"] = "Dịch vụ ăn uống"
                 else:
                     data["Phân loại"] = "Khác"
+                print(f"  Final data: {data}")
                 return data, []  # Return early for OCR path
             else:
                 print(f"  OCR also failed for: {filename}")

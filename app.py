@@ -300,13 +300,16 @@ else:
                             # Keep original totals for N/A
                         else:
                             vat_str = data.get(f"Thuế {rate}", data.get("Tiền thuế", ""))
-                            before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
-                            base_row["VAT"] = vat_val if vat_val else vat_str
+                            base_row["VAT"] = vat_str
                             base_row["Thuế suất"] = rate
-                            if before_vat:
-                                base_row["Số tiền trước VAT"] = before_vat
-                            if total:
-                                base_row["Tổng tiền sau thuế"] = total
+                            # ONLY calculate if extracted values are MISSING
+                            # DO NOT overwrite already-extracted values!
+                            if not base_row.get("Số tiền trước VAT") or not str(base_row.get("Số tiền trước VAT")).strip():
+                                before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
+                                if before_vat:
+                                    base_row["Số tiền trước VAT"] = before_vat
+                                if total:
+                                    base_row["Tổng tiền sau thuế"] = total
                         all_rows.append(base_row)
                     else:
                         # Multiple rates - create multiple rows with calculated amounts

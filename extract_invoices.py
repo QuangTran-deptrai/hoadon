@@ -353,10 +353,14 @@ def extract_ocr_invoice_fields(text, filename=None):
     
     # Auto-calculate missing values (for Petrolimex 8% VAT)
     def parse_money(s):
-        """Convert string like '481.787' or '481,787' to float"""
+        """Convert string like '481.787' or '1.820.000,00' to int, handling decimals"""
         if not s:
             return 0
-        s = s.replace(',', '').replace('.', '')  # Remove separators
+        s = str(s).strip()
+        # Handle decimal suffix (like ,00 or .00)
+        if re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
+             s = s[:-3]
+        s = s.replace(',', '').replace('.', '')
         try:
             return int(s)
         except:
@@ -839,10 +843,17 @@ def extract_invoice_data(pdf_source, filename=None):
     """
     
     def parse_money(s):
-        """Convert string like '481.787' or '481,787' to float"""
+        """Convert string like '481.787' or '1.820.000,00' to int, handling decimals"""
         if not s:
             return 0
-        s = str(s).replace(',', '').replace('.', '')
+        s = str(s).strip()
+        
+        # Handle decimal suffix (like ,00 or .00)
+        # Only remove if it looks like a decimal (2 digits) and NOT thousands (3 digits)
+        if re.search(r'[,.]\d{2}$', s) and not re.search(r'[,.]\d{3}$', s):
+             s = s[:-3]
+             
+        s = s.replace(',', '').replace('.', '')
         try:
             return int(s)
         except:
@@ -1714,7 +1725,7 @@ def extract_invoice_data(pdf_source, filename=None):
                     tax_total_calc += current_tax
                     pre_tax_total_calc += current_pre
                     
-                    print(f"  -> Found Summary Line: {rate_str} | Tax: {current_tax} | Pre: {current_pre}")
+                    # print(f"  -> Found Summary Line: {rate_str} | Tax: {current_tax} | Pre: {current_pre}")
             except:
                 pass
         

@@ -1877,9 +1877,9 @@ def extract_invoice_data(pdf_source, filename=None):
                         
                         # Overwrite strategy:
                         # 1. If Curr is 0/Empty -> Overwrite
-                        # 2. If Diff is small (<= 5) -> Trust Calc (Fix rounding errors like 499,999 vs 500,000)
-                        # 3. If Diff is Huge (> 50% of Calc) -> Trust Calc (Fix Garbage regex capture)
-                        if curr_val == 0 or diff <= 5 or diff > tax_map[r] * 0.5:
+                        # 2. If Diff is Huge (> 50% of Calc) -> Trust Calc (Fix Garbage regex capture)
+                        # NOTE: Do NOT overwrite small diffs. Trust the OCR/Document if it's close.
+                        if curr_val == 0 or diff > tax_map[r] * 0.5:
                              data[key] = format_money(tax_map[r])
                              
                 # Recalculate Total Tax if it looks wrong or empty

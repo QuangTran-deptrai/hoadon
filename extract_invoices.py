@@ -235,8 +235,14 @@ def extract_ocr_invoice_fields(text, filename=None):
     """Extract invoice fields from OCR text (simpler patterns for OCR quality)."""
     data = {}
     
-    # Debug: print first 500 chars of OCR text
-    print(f"  OCR TEXT SAMPLE (first 500 chars): {text[:500]}")
+    # Debug: print relevant parts for money extraction
+    text_lower = text.lower()
+    print(f"  OCR TEXT (looking for money patterns):")
+    # Find and print lines with money-related keywords
+    for line in text.split('\n'):
+        line_lower = line.lower().strip()
+        if any(kw in line_lower for kw in ['tiền', 'tien', 'hang', 'hàng', 'thuế', 'thue', 'gtgt', 'cộng', 'cong', 'tổng', 'tong', 'thanh toán', 'thanh toan', 'cxc']):
+            print(f"    >> {line.strip()}")
     
     # Ký hiệu
     serial_match = re.search(r'[Kk]ý\s*hiệu[:\s]*([A-Z0-9]+)', text)

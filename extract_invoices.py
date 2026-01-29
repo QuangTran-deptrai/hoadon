@@ -191,18 +191,33 @@ def ocr_pdf_to_text(pdf_source, filename=None):
         return ""
     
     try:
+        import tempfile
+        
         # Convert PDF to images
         if isinstance(pdf_source, str):
-            images = convert_from_path(pdf_source, dpi=300, poppler_path=POPPLER_PATH)
+            # File path - use directly
+            if POPPLER_PATH:
+                images = convert_from_path(pdf_source, dpi=300, poppler_path=POPPLER_PATH)
+            else:
+                images = convert_from_path(pdf_source, dpi=300)
         else:
-            # For BytesIO, need to save to temp file first
-            import tempfile
+            # BytesIO stream - save to temp file first
+            # IMPORTANT: Seek to beginning before reading
+            pdf_source.seek(0)
+            pdf_bytes = pdf_source.read()
+            pdf_source.seek(0)  # Reset for potential future use
+            
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                tmp.write(pdf_source.read())
+                tmp.write(pdf_bytes)
                 tmp_path = tmp.name
-            pdf_source.seek(0)  # Reset stream
-            images = convert_from_path(tmp_path, dpi=300, poppler_path=POPPLER_PATH)
-            os.unlink(tmp_path)  # Clean up
+            
+            try:
+                if POPPLER_PATH:
+                    images = convert_from_path(tmp_path, dpi=300, poppler_path=POPPLER_PATH)
+                else:
+                    images = convert_from_path(tmp_path, dpi=300)
+            finally:
+                os.unlink(tmp_path)  # Clean up temp file
         
         # OCR each page
         full_text = ""

@@ -9,14 +9,17 @@ from openpyxl.utils import get_column_letter
 
 # OCR imports (optional - for scanned PDFs)
 OCR_AVAILABLE = False
+POPPLER_PATH = None  # Use system default on Linux
 try:
     import pytesseract
     from pdf2image import convert_from_path
     from PIL import Image
     OCR_AVAILABLE = True
-    # Configure Tesseract path (Windows)
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    POPPLER_PATH = r"d:\hoadon\poppler-24.08.0\Library\bin"
+    # Configure Tesseract path (Windows only, Linux uses system default)
+    import platform
+    if platform.system() == "Windows":
+        pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        POPPLER_PATH = r"d:\hoadon\poppler-24.08.0\Library\bin"
 except ImportError:
     pass  # OCR not available, will skip scanned PDFs
 

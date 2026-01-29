@@ -1446,6 +1446,39 @@ def extract_invoice_data(pdf_source, filename=None):
                 else:
                     data["Thuế khác"] = data["Tiền thuế"]
         
+        # Priority 3.5: Handle "Hóa đơn bán hàng" (Sales Invoice - direct sale, often no dedicated TAX line)
+        # Identify by Title or "Total amount" pattern from log: "a, dịch vụ(Total amount): 5.400.000"
+        is_sales_invoice = "HÓA ĐƠN BÁN HÀNG" in full_text.upper() or "(SALES INVOICE)" in full_text.upper()
+        
+        if is_sales_invoice:
+             # Try to find total amount if missing
+             if not data["Số tiền sau"]:
+                 # Pattern from log: "a, dịch vụ(Total amount): 5.400.000"
+                 # And generic "Total amount: ..."
+                 sales_total_match = re.search(r'(?:Total amount|dịch vụ\s*\(Total amount\))[:\s]*([\d\.,]+)', full_text, re.IGNORECASE)
+                 if sales_total_match:
+                     data["Số tiền sau"] = sales_total_match.group(1).strip()
+            
+             # For Sales Invoice, if 'Tax' is missing, usually Header Amount = Total Amount
+             if data["Số tiền sau"] and not data["Số tiền trước Thuế"]:
+                 data["Số tiền trước Thuế"] = data["Số tiền sau"]
+                 # Tax is implicitly included or 0, but usually we just leave Tax empty or 0
+        
+        # Priority 4: Auto-classify "Dịch vụ du lịch"
+        # Check Seller Name for keywords
+        seller_upper = data.get("Đơn vị bán", "").upper()
+        full_text_upper = full_text.upper()
+        
+        if "DU LỊCH" in seller_upper or "TRAVEL" in seller_upper or "DỊCH VỤ DU LỊCH" in full_text_upper:
+            data["Phân loại"] = "Dịch vụ du lịch"
+        
+        # Refine Seller Name for this specific invoice if it was cut off
+        # Text: "HỘ KINH DOANH DỊCH VỤ DU LỊCH NHÂN LỢI PHÁT"
+        if "NHÂN LỢI PHÁT" in full_text_upper and not data["Đơn vị bán"]:
+             seller_match = re.search(r'HỘ KINH DOANH DỊCH VỤ DU LỊCH [^\n]+', full_text, re.IGNORECASE)
+             if seller_match:
+                 data["Đơn vị bán"] = seller_match.group(0).strip()
+        
         # After tax (total payment)
         after_tax_patterns = [
             r'Tổng cộng\s*/\s*Total Amount[:\s]*([\d\.,]+)',  # C26MAP: Tổng cộng / Total Amount: 7.144.200

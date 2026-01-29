@@ -283,24 +283,33 @@ def extract_ocr_invoice_fields(text, filename=None):
             data["Mã số thuế"] = m.group(1)
             break
     
-    # Số tiền trước thuế
+    # Số tiền trước thuế (Petrolimex specific patterns)
     before_patterns = [
         r'[Cc]ộng\s*tiền\s*hàng[:\s]*([\d\.,]+)',
-        r'ông\s*tiên\s*hang[:\s]*([\d\.,]+)',
+        r'ông\s*tiên\s*hang[:\s]*([\d\.,]+)',       # OCR typo: Cộng tiền hàng
+        r'ông\s*tiền\s*hàng[:\s]*([\d\.,]+)',       # OCR typo variant
         r'[Tt]iền\s*hàng[:\s]*([\d\.,]+)',
+        # Petrolimex: Look for amount before VAT line
+        r'([\d\.,]{5,})\s*(?:à\s*)?[Pp]etro',       # "481.787à PetroVietnam"
+        r'hang[:\s]*([\d\.,]+)',                    # "tiên hang: 462.963"
     ]
     for p in before_patterns:
         m = re.search(p, text)
         if m:
-            data["Số tiền trước Thuế"] = m.group(1)
-            break
+            val = m.group(1).strip()
+            # Skip if looks like year (2025, 2026)
+            if not re.match(r'^20[0-9]{2}$', val):
+                data["Số tiền trước Thuế"] = val
+                break
     
-    # VAT
+    # VAT (Petrolimex specific)
     vat_patterns = [
         r'[Tt]iền\s*thuế\s*GTGT[:\s]*([\d\.,]+)',
-        r'[Cc]XC[:\s]*([\d\.,]+)',
+        r'ién\s*thuê\s*GTGT[:\s]*\(?\s*\d+\s*%?\s*\)?\s*([\d\.,]+)',  # OCR typo
+        r'thuê\s*GTGT\s*\(?\s*8\s*%?\s*\)?\s*([\d\.,]+)',             # thuê GTGT (8%) 38.543
+        r'[Cc]XC[:\s]*([\d\.,]+)',                                    # "a CXC 37.087"
         r'thuế\s*GTGT[:\s]*([\d\.,]+)',
-        r'ién\s*thuê\s*GTGT[:\s]*\(?\s*\d+\s*%?\s*\)?\s*([\d\.,]+)',
+        r'GTGT\s*\(?\s*\d+\s*%?\s*\)?\s*([\d\.,]+)',                 # GTGT (8%) 38.543
     ]
     for p in vat_patterns:
         m = re.search(p, text)
@@ -308,24 +317,31 @@ def extract_ocr_invoice_fields(text, filename=None):
             data["Tiền thuế"] = m.group(1)
             break
     
-    # Tax rate detection
+    # Tax rate detection (Petrolimex uses 8%)
     if re.search(r'8\s*%', text):
         data["Thuế 8%"] = data.get("Tiền thuế", "")
     elif re.search(r'10\s*%', text):
         data["Thuế 10%"] = data.get("Tiền thuế", "")
     
-    # Tổng tiền sau thuế
+    # Tổng tiền sau thuế (Petrolimex specific)
     total_patterns = [
-        r'[Tt]ổng\s*(?:cộng|tiền)\s*thanh\s*toán[:\s]*([\d\.,]+)',
-        r'[Ff]e\s*[Pp]er\s*0\s*[Tt]ana[:\s]*([\d\.,]+)',
+        r'[Tt]ổng\s*(?:số\s*)?(?:cộng|tiền)\s*thanh\s*toán[:\s]*([\d\.,]+)',
+        r'ông\s*sô\s*tiên\s*thanh\s*toán[:\s]*([\d\.,]+)',  # OCR typo
+        r'[Ff]e\s*[Pp]er\s*0\s*[Tt]ana[:\s]*([\d\.,]+)',    # OCR typo: "Fe Per 0 Tana"
         r'[Tt]ổng\s*(?:cộng|tiền)[:\s]*([\d\.,]+)',
-        r'(\d{1,3}(?:[.,]\d{3})+)\s*đồng',
+        r'thanh\s*toán[:\s]*([\d\.,]+)',
+        # Match "Năm trăm nghìn đồng" pattern - extract preceding number
+        r'([\d\.,]{6,})\s*[Tt]ổng\s*số\s*tiền',
+        # Fallback: any 6-digit number ending with ,000
+        r'(\d{2,3}[.,]\d{3})\s*(?:đồng|VND)',
     ]
     for p in total_patterns:
         m = re.search(p, text)
         if m:
-            data["Số tiền sau"] = m.group(1)
-            break
+            val = m.group(1).strip()
+            if not re.match(r'^20[0-9]{2}$', val):
+                data["Số tiền sau"] = val
+                break
     
     # Mã tra cứu
     lookup_match = re.search(r'[Mm]ã\s*tra\s*cứu[:\s]*([A-Z0-9*]+)', text)
@@ -810,9 +826,16 @@ def extract_invoice_data(pdf_source, filename=None):
                 for key, val in ocr_data.items():
                     if key in data and val:
                         data[key] = val
-                # Auto-classify as Xăng xe if Petrolimex
-                if "petrolimex" in ocr_text.lower():
+                # Auto-classify based on content
+                ocr_lower = ocr_text.lower()
+                if any(x in ocr_lower for x in ['petrolimex', 'xăng', 'ron 95', 'ron95', 'diesel', 'dầu diesel']):
                     data["Phân loại"] = "Xăng xe"
+                elif any(x in ocr_lower for x in ['khách sạn', 'hotel', 'phòng nghỉ']):
+                    data["Phân loại"] = "Dịch vụ phòng nghỉ"
+                elif any(x in ocr_lower for x in ['nhà hàng', 'quán ăn', 'món ăn']):
+                    data["Phân loại"] = "Dịch vụ ăn uống"
+                else:
+                    data["Phân loại"] = "Khác"
                 return data, []  # Return early for OCR path
             else:
                 print(f"  OCR also failed for: {filename}")

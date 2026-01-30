@@ -75,11 +75,15 @@ def classify_content(services_text, seller_name=""):
     for category, keywords in CATEGORY_KEYWORDS.items():
         score = 0
         for kw in keywords:
-            # Use regex word boundary to avoid partial matches (e.g. "thấp" matching "hấp", "lượng" matching "lươn")
-            # \b matches word boundary. Escape keyword to handle special chars.
-            pattern = r'\b' + re.escape(kw.lower()) + r'\b'
-            if re.search(pattern, text_lower):
-                score += 1
+            # Use regex word boundary to avoid partial matches (e.g. "thấp" matching "hấp")
+            # BUT for "Xăng xe", OCR often concatenates (e.g. "XăngRON95"), so use substring match
+            if category == "Xăng xe":
+                if kw.lower() in text_lower:
+                    score += 1
+            else:
+                pattern = r'\b' + re.escape(kw.lower()) + r'\b'
+                if re.search(pattern, text_lower):
+                    score += 1
         
         if score > 0:
             scores[category] = score

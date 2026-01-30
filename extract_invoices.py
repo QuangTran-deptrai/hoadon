@@ -1363,6 +1363,8 @@ def extract_invoice_data(pdf_source, filename=None):
             r'Mã tra cứu[:\s]*([A-Za-z0-9]+)',
             r'[Ll]ookup\s*code[):\s]*([A-Za-z0-9]+)',
             r'Ma tra cuu[:\s]*([A-Za-z0-9]+)', # Non-accented
+            r'Mã tra cứu\s*\([Cc]ode\)[:\s]*([A-Za-z0-9]+)', # K26THT: Mã tra cứu (Code): ...
+            r'với mã[:\s]*([A-Za-z0-9]+)', # C26MCX: lấy hóa đơn với mã: ...
         ]
         for pattern in security_patterns:
             match = re.search(pattern, full_text, re.IGNORECASE)
@@ -1380,6 +1382,9 @@ def extract_invoice_data(pdf_source, filename=None):
                     # Very long code might be CQT, store separately
                     if not data["Mã CQT"]:
                         data["Mã CQT"] = code
+        
+        # Fallback: If no Lookup Code found but CQT Code exists (often treated as the unique ID for VNPT/others)
+        # Check this AFTER extracting Code to avoid overwriting invalid long codes
         
         # Fallback for PSD.pdf where "Mã tra cứu" is not clearly labeled but looks like a long code
         if not data["Mã tra cứu"]:
@@ -1433,6 +1438,10 @@ def extract_invoice_data(pdf_source, filename=None):
                 cqt_code = match.group(1).strip().replace('\u00AD', '-')
                 data["Mã CQT"] = cqt_code
                 break
+        
+        # FINAL FALLBACK: If Lookup Code is still empty, use CQT Code
+        if not data["Mã tra cứu"] and data["Mã CQT"]:
+            data["Mã tra cứu"] = data["Mã CQT"]
         
         # LOOKUP LINK - Multiple patterns
         link_patterns = [
@@ -1519,6 +1528,10 @@ def extract_invoice_data(pdf_source, filename=None):
             (r'Tiền thuế[:\s]*[\(\[]?\s*10\s*%\s*[\)\]]?[:\s]*(\d[\d\.,]*)', "Thuế 10%", 1),
             (r'Tiền thuế[:\s]*[\(\[]?\s*8\s*%\s*[\)\]]?[:\s]*(\d[\d\.,]*)', "Thuế 8%", 1),
             (r'Tiền thuế[:\s]*[\(\[]?\s*5\s*%\s*[\)\]]?[:\s]*(\d[\d\.,]*)', "Thuế 5%", 1),
+            # Loose format: "Tiền thuế ... 10% ... amount"
+            (r'Tiền thuế[^%\d]*10\s*%.*?(\d[\d\.,]*)', "Thuế 10%", 1),
+            (r'Tiền thuế[^%\d]*8\s*%.*?(\d[\d\.,]*)', "Thuế 8%", 1),
+            (r'Tiền thuế[^%\d]*5\s*%.*?(\d[\d\.,]*)', "Thuế 5%", 1),
         ]
         for pattern, column, group_idx in multi_col_patterns:
             matches = list(re.finditer(pattern, full_text, re.IGNORECASE))

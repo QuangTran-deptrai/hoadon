@@ -32,7 +32,7 @@ CATEGORY_KEYWORDS = {
         "đậu", "trứng", "lươn", "hàu", "khô mực", "khăn lạnh", "hủ tiếu", "baba",
         "bồ câu", "chả", "dừa", "khoáng", "suối", "sả", "rượu", "coffee", "cafe",
         "katinat", "highlands", "starbucks", "phúc long", "trung nguyên", "golden gate",
-        "pizza", "kfc", "lotteria", "jollibee", "mcdonald", "domino","Xa lach rau mam"
+        "pizza", "kfc", "lotteria", "jollibee", "mcdonald", "domino","Xa lach rau mam", "buffet"
     ],
     "Dịch vụ phòng nghỉ": [
         "thuê phòng", "phòng số", "cho thuê phòng", "phòng họp", "meeting room",
@@ -1368,6 +1368,10 @@ def extract_invoice_data(pdf_source, filename=None):
             match = re.search(pattern, full_text, re.IGNORECASE)
             if match:
                 code = match.group(1)
+                # Avoid capturing URL parts or headers as code
+                if any(x in code.lower() for x in ["http", "tracuu", "website", "invoice", "check", ".com", ".vn"]):
+                    continue
+
                 # Allow longer codes (VNPT uses 32 chars)
                 if 5 <= len(code) <= 35:
                     data["Mã tra cứu"] = code

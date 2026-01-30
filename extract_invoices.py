@@ -309,6 +309,9 @@ def extract_ocr_invoice_fields(text, filename=None):
         r'[Mm]a\s*số\s*thuế[:\s]*([\d\-\u00AD\s]+)',
         r'MST[:\s]*([\d\-\u00AD\s]+)',
         r'[Mm]ã\s*số\s*thuế[:\s]*([\d\-\u00AD\s]+)',
+        r'[Mm]a\s*s[eoc]\s*thu[eé][:\s]*([\d\-\u00AD\s]+)', # Handle "Ma sé thué"
+        r'[Mm]a\s*s.\s*thu.[:\s]*([\d\-\u00AD\s]+)',
+        r'tax\s*code[:\s]*([\d\-\u00AD\s]+)',
     ]
     
     found_mst = None
@@ -341,6 +344,19 @@ def extract_ocr_invoice_fields(text, filename=None):
             data["Mã số thuế"] = found_mst
             print(f"  [OCR-MST] Accepted: {found_mst}")
             break
+            
+    # Fallback: Petrolimex specific hardcoded patterns caused by OCR errors?
+    # Based on log: "Ma sé thué: 0300555450" but regex above might miss due to spacing oddities.
+    if not data.get("Mã số thuế"):
+        # Just look for the specific sequence "Ma se thue" in normalized text
+        norm = text.lower().replace('é', 'e').replace('ú', 'u').replace('ế', 'e')
+        # Matches: "ma se thue: 0300555450"
+        m_ocr = re.search(r'(?:ma se thue|ma so thue|mst)[^0-9]*([0-9]{10,14})', norm)
+        if m_ocr:
+             cand = m_ocr.group(1)
+             if not any(ign in cand for ign in ignore_mst):
+                 data["Mã số thuế"] = cand
+                 print(f"  [OCR-MST] Accepted via fallback: {cand}")
     
     # Số tiền trước thuế (Petrolimex specific patterns from cloud OCR)
     before_patterns = [

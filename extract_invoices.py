@@ -300,15 +300,42 @@ def extract_ocr_invoice_fields(text, filename=None):
             data["Ngày hóa đơn"] = f"{date_match2.group(1)}/{date_match2.group(2)}/{date_match2.group(3)}"
     
     # MST bên bán
+    ignore_mst = ['0106869738', '0100684378', '0101245171', '0305482862', '0103243195', '0101360697']
     mst_patterns = [
-        r'[Mm]a\s*số\s*thuế[:\s]*(\d{10,14})',
-        r'MST[:\s]*(\d{10,14})',
-        r'[Mm]ã\s*số\s*thuế[:\s]*(\d{10,14})',
+        r'[Mm]a\s*số\s*thuế[:\s]*([\d\-\u00AD\s]+)',
+        r'MST[:\s]*([\d\-\u00AD\s]+)',
+        r'[Mm]ã\s*số\s*thuế[:\s]*([\d\-\u00AD\s]+)',
     ]
+    
+    found_mst = None
     for p in mst_patterns:
-        m = re.search(p, text)
-        if m:
-            data["Mã số thuế"] = m.group(1)
+        if found_mst: break
+        for m in re.finditer(p, text):
+            raw_val = m.group(1)
+            val = raw_val.replace(' ', '').replace('.', '').replace('-', '').replace('\u00AD', '').strip()
+            # Valid length
+            if len(val) < 10 or len(val) > 14: continue
+            
+            # Check blacklist
+            if any(ign in val for ign in ignore_mst):
+                print(f"  [OCR-MST] Ignored blacklisted: {val}")
+                continue
+                
+            # Check context (line content)
+            start = text.rfind('\n', 0, m.start()) + 1
+            end = text.find('\n', m.end())
+            if end == -1: end = len(text)
+            line_content = text[start:end].lower()
+            
+            # Ignore context keywords (Provider or Buyer)
+            if any(kw in line_content for kw in ['giải pháp', 'phần mềm', 'cung cấp bởi', 'phát hành bởi', 'created by', 'signature', 'ký bởi', 'bkav', 'ehoadon', 'mua hàng', 'người mua', 'đơn vị mua']):
+                 print(f"  [OCR-MST] Ignored bad context: {val} in '{line_content.strip()[:50]}...'")
+                 continue
+            
+            # Found a good one!
+            found_mst = val
+            data["Mã số thuế"] = found_mst
+            print(f"  [OCR-MST] Accepted: {found_mst}")
             break
     
     # Số tiền trước thuế (Petrolimex specific patterns from cloud OCR)
@@ -1091,17 +1118,20 @@ def extract_invoice_data(pdf_source, filename=None):
         # 3. Handle spaces in MST (0 3 0 ...)
         
         # Known Provider MSTs to ignore (VNPT, Viettel, BKAV, etc often appear in footer)
-        # 0106869738: VNPT
-        ignore_mst = ['0106869738', '0100684378', '0101245171']
+        # 0106869738: VNPT, 0101360697: BKAV
+        ignore_mst = ['0106869738', '0100684378', '0101245171', '0305482862', '0103243195', '0101360697']
         
         # Priority 0: Spaced MST Pattern (e.g. "0 3 0 1 4 3 3 9 8 4")
         # This is almost always the distinct Main Company MST at the header.
         # Must match sequence of digits separated by single spaces, length >= 10 digits
-        spaced_mst_match = re.search(r'Mã số thuế[:\s]*((?:\d\s){9,}\d)', full_text, re.IGNORECASE)
+        spaced_mst_match = re.search(r'Mã số thuế[:\s]*((?:\d\s+){9,}[\d\s-]*\d)', full_text, re.IGNORECASE)
         if spaced_mst_match:
              potential_mst = spaced_mst_match.group(1).replace(' ', '').strip()
              if not any(x in potential_mst for x in ignore_mst):
                  data["Mã số thuế"] = potential_mst
+                 print(f"  [MST] Found via Spaced pattern: {potential_mst}")
+             else:
+                 print(f"  [MST] Spaced match ignored: {potential_mst}")
         
         # Priority 0.5: VAT Code pattern (hotel invoices at footer)
         # Pattern: "VAT Code: 0300659964" or "VATCode: ..."
@@ -1150,7 +1180,24 @@ def extract_invoice_data(pdf_source, filename=None):
                 # If multiple candidates, usually the FIRST one is the seller (top of page), 
                 # unless the provider stamp is at the very top. 
                 # But typically Seller info is top-left or top-center.
-                data["Mã số thuế"] = candidates[0]
+                
+                # CONTEXT CHECK: If the line containing MST has "Gi?i ph?p", "Ph?m m?m", "Provider", ignore it
+                final_candidates = []
+                for c in candidates:
+                     is_bad_context = False
+                     # Find original match line to check context
+                     for line in full_text.split('\n'):
+                         if c in line.replace(' ', ''): # Approximation
+                             if any(kw in line.lower() for kw in ['giải pháp', 'phần mềm', 'cung cấp bởi', 'phát hành bởi', 'created by', 'signature', 'ký bởi', 'bkav', 'ehoadon']):
+                                 is_bad_context = True
+                                 print(f"  [MST] Ignored candidate {c} due to bad context line: {line.strip()}")
+                                 break
+                     if not is_bad_context:
+                         final_candidates.append(c)
+                
+                if final_candidates:
+                    data["Mã số thuế"] = final_candidates[0]
+                    print(f"  [MST] Found via Priority 2 (Standard): {data['Mã số thuế']}")
         
         # INVOICE NUMBER - Multiple patterns (order matters - more specific first)
         inv_patterns = [

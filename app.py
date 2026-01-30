@@ -78,8 +78,8 @@ if st.session_state["processing_complete"] and st.session_state["processed_df"] 
         border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
         
         # Column widths
-        widths = {'A': 15, 'B': 15, 'C': 12, 'D': 15, 'E': 15, 'F': 30, 'G': 18, 
-                  'H': 15, 'I': 12, 'J': 10, 'K': 15, 'L': 18, 'M': 35}
+        widths = {'A': 15, 'B': 15, 'C': 12, 'D': 15, 'E': 15, 'F': 20, 'G': 30, 'H': 18, 
+                  'I': 15, 'J': 12, 'K': 10, 'L': 15, 'M': 18, 'N': 35}
         for col_letter, width in widths.items():
             worksheet.column_dimensions[col_letter].width = width
 
@@ -94,8 +94,11 @@ if st.session_state["processing_complete"] and st.session_state["processed_df"] 
         worksheet.auto_filter.ref = worksheet.dimensions
         
         # Format Data
-        money_cols_idx = [8, 9, 11]  # H, I, K
-        center_cols_idx = [1, 2, 3, 4, 5, 10]  # A-E, J
+        # New Columns: 
+        # A:Team, B:SoHD, C:Ngay, D:MST, E:KyHieu, F:MaTraCuu, G:Link, H:PhanLoai
+        # I:TruocVAT, J:VAT, K:ThueSuat, L:SauThue, M:NV, N:File
+        money_cols_idx = [9, 10, 12]  # I, J, L
+        center_cols_idx = [1, 2, 3, 4, 5, 11]  # A-E, K
         
         for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
             for cell in row:
@@ -111,9 +114,9 @@ if st.session_state["processing_complete"] and st.session_state["processed_df"] 
                     cell.alignment = Alignment(vertical="center", wrap_text=True)
         
         # Merge cells for multi-tax-rate invoices
-        # Columns to merge by filename: H(Trước VAT), I(VAT), K(Sau thuế)
+        # Columns to merge by filename: I(Trước VAT), J(VAT), L(Sau thuế)
         # Team column (A) ALWAYS merged by Team value
-        merge_by_file_cols = [8, 9, 11]  # H, I, K
+        merge_by_file_cols = [9, 10, 12]  # I, J, L
         
         # First: Merge Team column by Team value (column A = 1)
         if len(df) > 0:
@@ -248,6 +251,7 @@ else:
                         "Ngày hóa đơn": data.get("Ngày hóa đơn", ""),
                         "Mã số thuế bên bán": data.get("Mã số thuế", ""),
                         "Số ký hiệu": data.get("Ký hiệu", ""),
+                        "Mã tra cứu": data.get("Mã tra cứu", ""),
                         "Link tra cứu": data.get("Link lấy hóa đơn", "") or data.get("Mã tra cứu", ""),
                         "Phân loại": final_category,
                         "Số tiền trước VAT": data.get("Số tiền trước Thuế", ""),
@@ -339,7 +343,7 @@ else:
             # Create DataFrame with new column order
             columns = [
                 "Team", "Số hóa đơn", "Ngày hóa đơn", "Mã số thuế bên bán", 
-                "Số ký hiệu", "Link tra cứu", "Phân loại", 
+                "Số ký hiệu", "Mã tra cứu", "Link tra cứu", "Phân loại", 
                 "Số tiền trước VAT", "VAT", "Thuế suất", "Tổng tiền sau thuế",
                 "Tên nhân viên", "Tên file"
             ]

@@ -1432,9 +1432,11 @@ def extract_invoice_data(pdf_source, filename=None):
              # Normalize text: lower, remove accents
              norm_text = full_text.lower().replace('á', 'a').replace('à', 'a').replace('ã', 'a').replace('ạ', 'a').replace('ả', 'a') \
                                           .replace('é', 'e').replace('è', 'e').replace('ẽ', 'e').replace('ẹ', 'e').replace('ẻ', 'e') \
-                                          .replace('ô', 'o').replace('ố', 'o').replace('ồ', 'o').replace('ỗ', 'o').replace('ộ', 'o').replace('ổ', 'o')
-             # Pattern: "ma so thue" followed by digits
-             petro_mst = re.search(r'(?:ma so thue|mst|tax code)[^0-9]*([0-9]{10,14})', norm_text)
+                                          .replace('ô', 'o').replace('ố', 'o').replace('ồ', 'o').replace('ỗ', 'o').replace('ộ', 'o').replace('ổ', 'o') \
+                                          .replace('ê', 'e').replace('ế', 'e').replace('ề', 'e').replace('ễ', 'e').replace('ệ', 'e').replace('ể', 'e')
+             # Pattern: "ma so thue" or "ma se thue" (OCR typo) followed by digits
+             # Handle "Ma sé thué" -> "ma se thue"
+             petro_mst = re.search(r'(?:ma\s+s[eoc]\s+thue|ma\s+so\s+thue|ma\s+s.\s+thue|mst|tax code)[^0-9]*([0-9]{10,14})', norm_text)
              if petro_mst:
                  mst_cand = petro_mst.group(1)
                  if not any(x in mst_cand for x in ignore_mst):

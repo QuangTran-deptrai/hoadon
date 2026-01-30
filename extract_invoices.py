@@ -1366,13 +1366,15 @@ def extract_invoice_data(pdf_source, filename=None):
             r'Ma tra cuu[:\s]*([A-Za-z0-9]+)', # Non-accented
             r'Mã tra cứu\s*\([Cc]ode\)[:\s]*([A-Za-z0-9]+)', # K26THT: Mã tra cứu (Code): ...
             r'với mã[:\s]*([A-Za-z0-9]+)', # C26MCX: lấy hóa đơn với mã: ...
+            r'nhập mã\s+([A-Za-z0-9]+)', # NEW: "nhập mã [CODE] để lấy hóa đơn"
+            r'provided code[^:]*[:\s]*([A-Za-z0-9]+)', # NEW: "provided code to get invoice: [CODE]"
         ]
         for pattern in security_patterns:
             match = re.search(pattern, full_text, re.IGNORECASE)
             if match:
                 code = match.group(1)
                 # Avoid capturing URL parts or headers as code
-                if any(x in code.lower() for x in ["http", "tracuu", "website", "invoice", "check", ".com", ".vn"]):
+                if any(x in code.lower() for x in ["http", "tracuu", "website", "invoice", "check", ".com", ".vn", "please", "vui lòng", "quý khách", "access"]):
                     continue
 
                 # Allow longer codes (VNPT uses 32 chars)
@@ -1423,6 +1425,20 @@ def extract_invoice_data(pdf_source, filename=None):
              valid_mst = [t for t in tax_codes if not any(ign in t for ign in ignore_mst) and not any(t in ign for ign in ignore_mst)]
              if valid_mst:
                  data["Mã số thuế"] = valid_mst[0]  # Seller's tax code (first one)
+        
+        # PETROLIMEX SPECIFIC: OCR often messes up "Ma so thue" label or merges it.
+        # Look for "Ma so thue: 0300555450" or similar in OCR text (normalized)
+        if not data["Mã số thuế"]:
+             # Normalize text: lower, remove accents
+             norm_text = full_text.lower().replace('á', 'a').replace('à', 'a').replace('ã', 'a').replace('ạ', 'a').replace('ả', 'a') \
+                                          .replace('é', 'e').replace('è', 'e').replace('ẽ', 'e').replace('ẹ', 'e').replace('ẻ', 'e') \
+                                          .replace('ô', 'o').replace('ố', 'o').replace('ồ', 'o').replace('ỗ', 'o').replace('ộ', 'o').replace('ổ', 'o')
+             # Pattern: "ma so thue" followed by digits
+             petro_mst = re.search(r'(?:ma so thue|mst|tax code)[^0-9]*([0-9]{10,14})', norm_text)
+             if petro_mst:
+                 mst_cand = petro_mst.group(1)
+                 if not any(x in mst_cand for x in ignore_mst):
+                      data["Mã số thuế"] = mst_cand
         
         # CQT CODE - Multiple patterns (include soft hyphen \u00AD used in some PDFs)
         cqt_patterns = [

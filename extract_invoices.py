@@ -1507,6 +1507,18 @@ def extract_invoice_data(pdf_source, filename=None):
             (r'Tổng tiền chịu thuế suất[^:\n]*:\s*5\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 5%", 2),
             (r'Tổng tiền chịu thuế suất[^:\n]*:\s*8\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 8%", 2),
             (r'Tổng tiền chịu thuế suất[^:\n]*:\s*10\s*%\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)\s+(\d[\d\.,]*)', "Thuế 10%", 2),
+            # Format: "Thuế suất GTGT: 8%" (followed by tax amount or just standalone)
+            (r'Thuế suất(?:\s*GTGT)?[:\s]*8\s*%\s*Tiền thuế GTGT[:\s]*(\d[\d\.,]*)', "Thuế 8%", 1),
+            (r'Thuế suất(?:\s*GTGT)?[:\s]*10\s*%\s*Tiền thuế GTGT[:\s]*(\d[\d\.,]*)', "Thuế 10%", 1),
+            (r'Thuế suất(?:\s*GTGT)?[:\s]*5\s*%\s*Tiền thuế GTGT[:\s]*(\d[\d\.,]*)', "Thuế 5%", 1),
+            # Format: "Tiền thuế GTGT: ( 8% ) 37.037" (C26MCX)
+            (r'Tiền thuế GTGT[:\s]*[\(\[]?\s*8\s*%\s*[\)\]]?\s*(\d[\d\.,]*)', "Thuế 8%", 1),
+            (r'Tiền thuế GTGT[:\s]*[\(\[]?\s*10\s*%\s*[\)\]]?\s*(\d[\d\.,]*)', "Thuế 10%", 1),
+            (r'Tiền thuế GTGT[:\s]*[\(\[]?\s*5\s*%\s*[\)\]]?\s*(\d[\d\.,]*)', "Thuế 5%", 1),
+            # Format: "Tiền thuế ( 10% ): 154.545" (C26TKM) - no GTGT
+            (r'Tiền thuế[:\s]*[\(\[]?\s*10\s*%\s*[\)\]]?[:\s]*(\d[\d\.,]*)', "Thuế 10%", 1),
+            (r'Tiền thuế[:\s]*[\(\[]?\s*8\s*%\s*[\)\]]?[:\s]*(\d[\d\.,]*)', "Thuế 8%", 1),
+            (r'Tiền thuế[:\s]*[\(\[]?\s*5\s*%\s*[\)\]]?[:\s]*(\d[\d\.,]*)', "Thuế 5%", 1),
         ]
         for pattern, column, group_idx in multi_col_patterns:
             matches = list(re.finditer(pattern, full_text, re.IGNORECASE))

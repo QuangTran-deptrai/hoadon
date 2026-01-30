@@ -1440,8 +1440,9 @@ def extract_invoice_data(pdf_source, filename=None):
                 break
         
         # FINAL FALLBACK: If Lookup Code is still empty, use CQT Code
-        if not data["Mã tra cứu"] and data["Mã CQT"]:
-            data["Mã tra cứu"] = data["Mã CQT"]
+        # REMOVED due to User Request: "không được lấy mã cơ quan thuế thay vào cho mã tra cứu"
+        # if not data["Mã tra cứu"] and data["Mã CQT"]:
+        #    data["Mã tra cứu"] = data["Mã CQT"]
         
         # LOOKUP LINK - Multiple patterns
         link_patterns = [
@@ -1456,6 +1457,39 @@ def extract_invoice_data(pdf_source, filename=None):
                 link = match.group(1).rstrip('.').rstrip(',')
                 data["Link lấy hóa đơn"] = link
                 break
+        
+        # USER REQUEST: "mã tra cứu luôn hiển thị bên cạnh link tra cứu"
+        # Search specifically for Code near Link (using generic link patterns if exact link mismatch)
+        if not data["Mã tra cứu"]:
+             # Pattern: Link followed by Code (within proximity)
+             # Matches: http://... <space> CODE
+             # We iterate to find the Best candidate
+             prox_patterns = [
+                 r'(?:https?://[^\s]+)[\s\n]+([A-Za-z0-9]{6,50})\b', # Link -> Code
+                 r'\b([A-Za-z0-9]{6,50})[\s\n]+(?:https?://[^\s]+)', # Code -> Link
+             ]
+             for p in prox_patterns:
+                 matches = re.finditer(p, full_text, re.IGNORECASE)
+                 for m in matches:
+                      cand = m.group(1)
+                      # Filter junk
+                      if cand.lower() in ["website", "http", "https", "link", "tại", "vnbox", "vnpt", "invoice"]:
+                          continue
+                      if "tracuu" in cand.lower():
+                          continue
+                      # Filter if it matches MST
+                      if data["Mã số thuế"] and cand == data["Mã số thuế"]:
+                          continue
+                      # Filter if it looks like a pure date (dd/mm/yyyy no separators? rare) or phone number
+                      
+                      # Validation: Lookup Codes usually complicated. 
+                      # If purely numeric, risky? No, some are numeric.
+                      
+                      if 6 <= len(cand) <= 50:
+                           data["Mã tra cứu"] = cand
+                           break
+                 if data["Mã tra cứu"]:
+                     break
         
         # AMOUNTS - Multiple patterns
         # Before tax
@@ -2012,6 +2046,21 @@ def extract_invoice_data(pdf_source, filename=None):
     except Exception as e:
         print(f"Error processing {filename}: {e}")
     
+    # RE-CALCULATE TAX RATE if missing (Final Pass)
+    # This runs after all other fallbacks/aggregations to catch cases where Pre/Tax were inferred but Rate wasn't set.
+    if data["Tiền thuế"] and data["Số tiền trước Thuế"] and not any(data.get(c) for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%"]):
+        try:
+             t_val = parse_money(data["Tiền thuế"])
+             p_val = parse_money(data["Số tiền trước Thuế"])
+             if t_val > 0 and p_val > 0:
+                 rate = round(t_val / p_val * 100)
+                 # Allow slight tolerance if needed, but rounding usually handles it
+                 if rate in [0, 5, 8, 10]:
+                      key = f"Thuế {rate}%"
+                      data[key] = data["Tiền thuế"]
+        except Exception:
+             pass
+
     # FINAL CLEANUP: Clean all data fields
     for k, v in data.items():
         if isinstance(v, str):

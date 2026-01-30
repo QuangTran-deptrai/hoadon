@@ -1354,6 +1354,7 @@ def extract_invoice_data(pdf_source, filename=None):
         security_patterns = [
             r'Mã tra cứu hoá đơn[:\s]*([A-Za-z0-9]+)',  # C26MAP: Mã tra cứu hoá đơn: 9751Opera19012026
             r'Mã nhận hóa đơn\s*\([Cc]ode for checking\)[:\s]*([A-Z0-9]+)',  # Special case
+            r'Mã nhận hóa đơn[:\s]*([A-Za-z0-9]+)',  # Simple "Mã nhận hóa đơn: 5c57d33"
             r'Mã tra cứu\s*\([Ll]ookup\s*code\)[:\s]*([A-Za-z0-9_]+)',  # VNPT: Mã tra cứu(Lookup code):HCM...
             r'Mã tra cứu hóa đơn\s*\([Ii]nvoice code\)[:\s]*([A-Za-z0-9_]+)',  # MISA variation
             r'Mã tra cứu(?:\s*HĐĐT)?(?:\s*này)?[:\s]*([A-Za-z0-9_]+)',
@@ -1450,13 +1451,23 @@ def extract_invoice_data(pdf_source, filename=None):
             r'Tra cứu hóa đơn tại[:\s]*(https?://[^\s]+)',  # Simple format
             r'(?:Tra cứu[^:]*tại|Trang tra cứu|website)[:\s]*(https?://[^\s]+)',
             r'(https?://[^\s]*(?:tracuu|tra-cuu|invoice|vnpt-invoice|minvoice)[^\s]*)',
+            # Pattern for links without http/https (e.g. hoadon.pvoil.vn, tracuu.wininvoice.vn)
+            r'(?:Tra cứu[^:]*tại|Trang tra cứu|website)[:\s]*([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?)',
         ]
         for pattern in link_patterns:
             match = re.search(pattern, full_text, re.IGNORECASE)
             if match:
                 link = match.group(1).rstrip('.').rstrip(',')
-                data["Link lấy hóa đơn"] = link
-                break
+                # If link doesn't start with http, prepend http://
+                if not link.lower().startswith('http') and not link.lower().startswith('www'):
+                     link = "http://" + link
+                if "www" in link.lower() and not link.lower().startswith('http'):
+                     link = "http://" + link
+                
+                # Filter out junk that might be matched as domain
+                if '.' in link and len(link) > 5:
+                     data["Link lấy hóa đơn"] = link
+                     break
         
         # USER REQUEST: "mã tra cứu luôn hiển thị bên cạnh link tra cứu"
         # Search specifically for Code near Link (using generic link patterns if exact link mismatch)

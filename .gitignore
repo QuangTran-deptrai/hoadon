@@ -5,6 +5,12 @@ __pycache__/
 invoices_input/
 pdf_texts/
 debug_*.txt
+debug_*.py
+check_*.py
+output_*.txt
+raw_text_output.txt
+result_check_all.txt
+lighton_experiment/
 verify_app_logic.py
 test_*.py
 ocr_invoice.py

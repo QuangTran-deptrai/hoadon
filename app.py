@@ -38,6 +38,8 @@ if "processing_complete" not in st.session_state:
     st.session_state["processing_complete"] = False
 if "processed_df" not in st.session_state:
     st.session_state["processed_df"] = None
+if "report_type" not in st.session_state:
+    st.session_state["report_type"] = "Kế toán"
 
 # --- Main Application Logic (no login required) ---
 
@@ -67,6 +69,8 @@ if st.session_state["processing_complete"] and st.session_state["processed_df"] 
     
     # Excel Export with Merge Logic
     output = io.BytesIO()
+    report_type = st.session_state.get("report_type", "Kế toán")
+    
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name="Hóa đơn")
         worksheet = writer.sheets["Hóa đơn"]
@@ -77,67 +81,93 @@ if st.session_state["processing_complete"] and st.session_state["processed_df"] 
         border_style = Side(style='thin', color="000000")
         border = Border(left=border_style, right=border_style, top=border_style, bottom=border_style)
         
-        # Column widths
-        widths = {'A': 15, 'B': 15, 'C': 12, 'D': 15, 'E': 15, 'F': 20, 'G': 30, 'H': 18, 
-                  'I': 15, 'J': 12, 'K': 10, 'L': 15, 'M': 18, 'N': 35}
-        for col_letter, width in widths.items():
-            worksheet.column_dimensions[col_letter].width = width
-
         # Format Header
         for cell in worksheet[1]:
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = border
-        
+            
         worksheet.freeze_panes = 'A2'
         worksheet.auto_filter.ref = worksheet.dimensions
-        
-        # Format Data
-        # New Columns: 
-        # A:Team, B:SoHD, C:Ngay, D:MST, E:KyHieu, F:MaTraCuu, G:Link, H:PhanLoai
-        # I:TruocVAT, J:VAT, K:ThueSuat, L:SauThue, M:NV, N:File
-        money_cols_idx = [9, 10, 12]  # I, J, L
-        center_cols_idx = [1, 2, 3, 4, 5, 11]  # A-E, K
-        
-        for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
-            for cell in row:
-                if isinstance(cell, openpyxl.cell.cell.MergedCell): continue
-                cell.border = border
-                cell.font = Font(name="Arial", size=10)
-                if cell.col_idx in money_cols_idx:
-                    cell.number_format = '#,##0'
-                    cell.alignment = Alignment(horizontal="right", vertical="center")
-                elif cell.col_idx in center_cols_idx:
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                else:
-                    cell.alignment = Alignment(vertical="center", wrap_text=True)
-        
-        # Merge cells for multi-tax-rate invoices
-        # Columns to merge by filename: I(Trước VAT), J(VAT), L(Sau thuế)
-        # Team column (A) ALWAYS merged by Team value
-        merge_by_file_cols = [9, 10, 12]  # I, J, L
-        
-        # First: Merge Team column by Team value (column A = 1)
-        if len(df) > 0:
-            start_row = 2
-            current_team = worksheet.cell(row=2, column=1).value
+
+        if report_type == "Kinh doanh":
+            # === BUSINESS FORMAT ===
+            # Column widths for Business format (based on hoadon_tonghop.xlsx structure)
+            # A:Team, B:NV, C:File, D:Ngay, E:So...
+            widths = {'A': 15, 'B': 20, 'C': 30, 'D': 12, 'E': 10, 'F': 25, 'G': 15, 
+                      'H': 15, 'I': 12, 'J': 12, 'K': 12, 'L': 12, 'M': 10, 'N': 15, 
+                      'O': 15, 'P': 30, 'Q': 15, 'R': 15, 'S': 20, 'T': 10}
             
-            for excel_row in range(3, worksheet.max_row + 2):
-                if excel_row > worksheet.max_row:
-                    cell_value = None
-                else:
-                    cell_value = worksheet.cell(row=excel_row, column=1).value
-                
-                if cell_value != current_team:
-                    end_row = excel_row - 1
-                    if end_row > start_row:
-                        worksheet.merge_cells(f"A{start_row}:A{end_row}")
-                        top_cell = worksheet.cell(row=start_row, column=1)
-                        top_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            for i, (col_letter, width) in enumerate(widths.items()):
+                 if i < worksheet.max_column:
+                    worksheet.column_dimensions[get_column_letter(i+1)].width = width
+
+            money_cols = ["Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác", "Tiền thuế", "Số tiền sau"]
+            money_col_indices = [df.columns.get_loc(c) + 1 for c in money_cols if c in df.columns]
+
+            for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+                for cell in row:
+                    cell.border = border
+                    cell.font = Font(name="Arial", size=10)
+                    if cell.col_idx in money_col_indices:
+                        cell.number_format = '#,##0'
                     
-                    start_row = excel_row
-                    current_team = cell_value
+                    cell.alignment = Alignment(vertical="center", wrap_text=True)
+                    
+        else:
+            # === ACCOUNTING FORMAT (Existing) ===
+            # Column widths
+            widths = {'A': 15, 'B': 15, 'C': 12, 'D': 15, 'E': 15, 'F': 20, 'G': 30, 'H': 18, 
+                      'I': 15, 'J': 12, 'K': 10, 'L': 15, 'M': 18, 'N': 35}
+            for col_letter, width in widths.items():
+                worksheet.column_dimensions[col_letter].width = width
+
+            # Format Data
+            # New Columns: 
+            # A:Team, B:SoHD, C:Ngay, D:MST, E:KyHieu, F:MaTraCuu, G:Link, H:PhanLoai
+            # I:TruocVAT, J:VAT, K:ThueSuat, L:SauThue, M:NV, N:File
+            money_cols_idx = [9, 10, 12]  # I, J, L
+            center_cols_idx = [1, 2, 3, 4, 5, 11]  # A-E, K
+            
+            for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+                for cell in row:
+                    if isinstance(cell, openpyxl.cell.cell.MergedCell): continue
+                    cell.border = border
+                    cell.font = Font(name="Arial", size=10)
+                    if cell.col_idx in money_cols_idx:
+                        cell.number_format = '#,##0'
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    elif cell.col_idx in center_cols_idx:
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                    else:
+                        cell.alignment = Alignment(vertical="center", wrap_text=True)
+            
+            # Merge cells for multi-tax-rate invoices
+            # Columns to merge by filename: I(Trước VAT), J(VAT), L(Sau thuế)
+            # Team column (A) ALWAYS merged by Team value
+            merge_by_file_cols = [9, 10, 12]  # I, J, L
+            
+            # First: Merge Team column by Team value (column A = 1)
+            if len(df) > 0:
+                start_row = 2
+                current_team = worksheet.cell(row=2, column=1).value
+                
+                for excel_row in range(3, worksheet.max_row + 2):
+                    if excel_row > worksheet.max_row:
+                        cell_value = None
+                    else:
+                        cell_value = worksheet.cell(row=excel_row, column=1).value
+                    
+                    if cell_value != current_team:
+                        end_row = excel_row - 1
+                        if end_row > start_row:
+                            worksheet.merge_cells(f"A{start_row}:A{end_row}")
+                            top_cell = worksheet.cell(row=start_row, column=1)
+                            top_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                        
+                        start_row = excel_row
+                        current_team = cell_value
         
         # NOTE: Money columns (H, I, K) are NO LONGER merged
         # Each row shows its own tax rate and amount for clarity
@@ -176,6 +206,10 @@ else:
         custom_category = ""
         if category_select == "Khác (Nhập tay)":
             custom_category = st.text_input("Nhập phân loại tùy chỉnh:")
+
+    # Report Type Selection
+    report_type = st.radio("Chọn loại báo cáo đầu ra:", ["Kế toán", "Kinh doanh"], horizontal=True)
+
     
     st.divider()
     
@@ -295,43 +329,70 @@ else:
                             return 0, vat_val, vat_val
                         return 0, 0, 0
                     
-                    if len(tax_rates) == 1:
-                        # Single rate - simple case
-                        rate = tax_rates[0]
-                        if rate == "N/A":
-                            base_row["VAT"] = data.get("Tiền thuế", "")
-                            base_row["Thuế suất"] = ""
-                            # Keep original totals for N/A
-                        else:
-                            vat_str = data.get(f"Thuế {rate}", data.get("Tiền thuế", ""))
-                            base_row["VAT"] = vat_str
-                            base_row["Thuế suất"] = rate
-                            # ONLY calculate if extracted values are MISSING
-                            # DO NOT overwrite already-extracted values!
-                            if not base_row.get("Số tiền trước VAT") or not str(base_row.get("Số tiền trước VAT")).strip():
-                                before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
-                                if before_vat:
-                                    base_row["Số tiền trước VAT"] = before_vat
-                                if total:
-                                    base_row["Tổng tiền sau thuế"] = total
-                        all_rows.append(base_row)
+                    if report_type == "Kinh doanh":
+                        # === BUSINESS FORMAT LOGIC (Wide) ===
+                        business_row = {
+                            "Team": team_input.strip(),
+                            "Tên nhân viên": employee_input.strip(),
+                            "Tên file": uploaded_file.name,
+                            "Ngày hóa đơn": data.get("Ngày hóa đơn", ""),
+                            "Số hóa đơn": data.get("Số hóa đơn", ""),
+                            "Đơn vị bán": data.get("Đơn vị bán", ""),
+                            "Phân loại": final_category,
+                            "Số tiền trước Thuế": data.get("Số tiền trước Thuế", ""),
+                            "Thuế 0%": data.get("Thuế 0%", ""),
+                            "Thuế 5%": data.get("Thuế 5%", ""),
+                            "Thuế 8%": data.get("Thuế 8%", ""),
+                            "Thuế 10%": data.get("Thuế 10%", ""),
+                            "Thuế khác": data.get("Thuế khác", ""),
+                            "Tiền thuế": data.get("Tiền thuế", ""),
+                            "Số tiền sau": data.get("Số tiền sau", ""),
+                            "Link lấy hóa đơn": data.get("Link lấy hóa đơn", "") or data.get("Mã tra cứu", ""),
+                            "Mã tra cứu": data.get("Mã tra cứu", ""),
+                            "Mã số thuế": data.get("Mã số thuế", ""),
+                            "Mã CQT": data.get("Mã CQT", ""),
+                            "Ký hiệu": data.get("Ký hiệu", "")
+                        }
+                        all_rows.append(business_row)
                     else:
-                        # Multiple rates - create multiple rows with calculated amounts
-                        for rate in tax_rates:
-                            row = base_row.copy()
-                            if rate == "Khác":
-                                row["VAT"] = data.get("Thuế khác", "")
-                                row["Thuế suất"] = "Khác"
+                        # === ACCOUNTING FORMAT LOGIC (Long) ===
+                        if len(tax_rates) == 1:
+                            # Single rate - simple case
+                            rate = tax_rates[0]
+                            if rate == "N/A":
+                                base_row["VAT"] = data.get("Tiền thuế", "")
+                                base_row["Thuế suất"] = ""
+                                # Keep original totals for N/A
                             else:
-                                vat_str = data.get(f"Thuế {rate}", "")
-                                before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
-                                row["VAT"] = vat_val if vat_val else vat_str
-                                row["Thuế suất"] = rate
-                                if before_vat:
-                                    row["Số tiền trước VAT"] = before_vat
-                                if total:
-                                    row["Tổng tiền sau thuế"] = total
-                            all_rows.append(row)
+                                vat_str = data.get(f"Thuế {rate}", data.get("Tiền thuế", ""))
+                                base_row["VAT"] = vat_str
+                                base_row["Thuế suất"] = rate
+                                # ONLY calculate if extracted values are MISSING
+                                # DO NOT overwrite already-extracted values!
+                                if not base_row.get("Số tiền trước VAT") or not str(base_row.get("Số tiền trước VAT")).strip():
+                                    before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
+                                    if before_vat:
+                                        base_row["Số tiền trước VAT"] = before_vat
+                                    if total:
+                                        base_row["Tổng tiền sau thuế"] = total
+                            all_rows.append(base_row)
+                        else:
+                            # Multiple rates - create multiple rows with calculated amounts
+                            for rate in tax_rates:
+                                row = base_row.copy()
+                                if rate == "Khác":
+                                    row["VAT"] = data.get("Thuế khác", "")
+                                    row["Thuế suất"] = "Khác"
+                                else:
+                                    vat_str = data.get(f"Thuế {rate}", "")
+                                    before_vat, vat_val, total = calc_amounts_for_rate(vat_str, rate)
+                                    row["VAT"] = vat_val if vat_val else vat_str
+                                    row["Thuế suất"] = rate
+                                    if before_vat:
+                                        row["Số tiền trước VAT"] = before_vat
+                                    if total:
+                                        row["Tổng tiền sau thuế"] = total
+                                all_rows.append(row)
                     
                 except Exception as e:
                     logger.error(f"Error processing {uploaded_file.name}: {e}")
@@ -340,13 +401,23 @@ else:
             status_box.success("✅ Đã xử lý xong tất cả!")
             logger.info(f"--- COMPLETION: Team={team_input}, Employee={employee_input} finished processing ---")
             
-            # Create DataFrame with new column order
-            columns = [
-                "Team", "Số hóa đơn", "Ngày hóa đơn", "Mã số thuế bên bán", 
-                "Số ký hiệu", "Mã tra cứu", "Link tra cứu", "Phân loại", 
-                "Số tiền trước VAT", "VAT", "Thuế suất", "Tổng tiền sau thuế",
-                "Tên nhân viên", "Tên file"
-            ]
+            # Create DataFrame with appropriate columns
+            if report_type == "Kinh doanh":
+                columns = [
+                    "Team", "Tên nhân viên", "Tên file", "Ngày hóa đơn", "Số hóa đơn", 
+                    "Đơn vị bán", "Phân loại", "Số tiền trước Thuế", 
+                    "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác", 
+                    "Tiền thuế", "Số tiền sau", "Link lấy hóa đơn", 
+                    "Mã tra cứu", "Mã số thuế", "Mã CQT", "Ký hiệu"
+                ]
+            else:
+                 columns = [
+                    "Team", "Số hóa đơn", "Ngày hóa đơn", "Mã số thuế bên bán", 
+                    "Số ký hiệu", "Mã tra cứu", "Link tra cứu", "Phân loại", 
+                    "Số tiền trước VAT", "VAT", "Thuế suất", "Tổng tiền sau thuế",
+                    "Tên nhân viên", "Tên file"
+                ]
+
             df = pd.DataFrame(all_rows)
             for col in columns:
                 if col not in df.columns:
@@ -354,7 +425,11 @@ else:
             df = df[columns]
             
             # Convert money columns
-            money_columns = ["Số tiền trước VAT", "VAT", "Tổng tiền sau thuế"]
+            if report_type == "Kinh doanh":
+                 money_columns = ["Số tiền trước Thuế", "Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác", "Tiền thuế", "Số tiền sau"]
+            else:
+                 money_columns = ["Số tiền trước VAT", "VAT", "Tổng tiền sau thuế"]
+
             for col in money_columns:
                 def convert_to_number(x):
                     if pd.isna(x) or x == '': return None
@@ -367,7 +442,11 @@ else:
                         return round(float(x_str))
                     except:
                         return x
-                df[col] = df[col].apply(convert_to_number)
+                if col in df.columns:
+                    df[col] = df[col].apply(convert_to_number)
+            
+            # Save to session state
+            st.session_state["report_type"] = report_type
             
             # Save to session state
             st.session_state["processed_df"] = df

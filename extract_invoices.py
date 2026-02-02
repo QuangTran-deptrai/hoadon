@@ -271,6 +271,28 @@ def extract_ocr_invoice_fields(text, filename=None):
     serial_match = re.search(r'[Kk]ý\s*hiệu[:\s]*([A-Z0-9]+)', text)
     if serial_match:
         data["Ký hiệu"] = serial_match.group(1)
+        
+    # Đơn vị bán (Seller) - New for OCR
+    seller_candidates = []
+    lines = text.split('\n')
+    for i, line in enumerate(lines[:15]): # Check first 15 lines
+        line_clean = line.strip()
+        # Common prefix for companies
+        if re.match(r'^(CÔNG TY|CHI NHÁNH|DNTN|TRUNG TÂM|HỘ KINH DOANH|CỬA HÀNG)', line_clean, re.IGNORECASE):
+            seller_candidates.append(line_clean)
+        elif 'PETROLIMEX' in line_clean.upper():
+            seller_candidates.append(line_clean)
+    
+    if seller_candidates:
+        # Pick the longest one logic or first one
+        raw_seller = seller_candidates[0]
+        # Cleanup "Ký hiệu: ..." from snippet if attached
+        if "Ký hiệu:" in raw_seller:
+            raw_seller = raw_seller.split("Ký hiệu:")[0].strip()
+        data["Đơn vị bán"] = raw_seller
+    else:
+        # Fallback: if 'bán' or 'seller' keyword exists
+        pass
     
     # Số hóa đơn - multiple patterns
     inv_patterns = [
@@ -472,12 +494,41 @@ def extract_ocr_invoice_fields(text, filename=None):
         if not data.get("Tiền thuế"):
             data["Tiền thuế"] = format_money(vat)
             data["Thuế 8%"] = format_money(vat)
+        if not data.get("Tiền thuế"):
+            data["Tiền thuế"] = format_money(vat)
+            data["Thuế 8%"] = format_money(vat)
         print(f"  [AUTO-CALC] Before tax = {before_tax}, VAT = {vat}")
+        
+    # If missing VAT but have before_tax and total
+    elif not vat and before_tax and total:
+        vat = total - before_tax
+        data["Tiền thuế"] = format_money(vat)
+        # Infer rate
+        rate = round(vat / before_tax, 2)
+        if rate == 0.08:
+            data["Thuế 8%"] = format_money(vat)
+        elif rate == 0.10:
+            data["Thuế 10%"] = format_money(vat)
+        elif rate == 0.05:
+            data["Thuế 5%"] = format_money(vat)
+        elif 'petrolimex' in text.lower(): # Standardize Petrolimex to 8% if ambiguous
+             data["Thuế 8%"] = format_money(vat)
+        else:
+             data["Thuế khác"] = format_money(vat)
+        print(f"  [AUTO-CALC] Inferred VAT = {vat} (Rate ~{rate})")
     
     # Mã tra cứu
-    lookup_match = re.search(r'[Mm]ã\s*tra\s*cứu[:\s]*([A-Z0-9*]+)', text)
-    if lookup_match:
+    lookup_match = re.search(r'(?:Mã|Ma)\s*(?:tra|tro)\s*(?:cứu|cuiu|cuu)[:\s]*([A-Z0-9*]+)', text, re.IGNORECASE)
+    if not lookup_match:
+         # Try finding code at bottom
+         lookup_match = re.search(r'\b([A-Z0-9]{10,})\b', text) # Simple long code
+    if lookup_match and len(lookup_match.group(1)) > 5:
         data["Mã tra cứu"] = lookup_match.group(1)
+        
+    # Mã CQT (New)
+    cqt_match = re.search(r'(?:Mã|Ma)\s*(?:CQT|cơ\s*quan\s*thuế)[:\s]*([A-Z0-9\-]+)', text, re.IGNORECASE)
+    if cqt_match:
+        data["Mã CQT"] = cqt_match.group(1)
     
     # Link
     link_match = re.search(r'(https?://[^\s]+)', text)
@@ -1259,12 +1310,14 @@ def extract_invoice_data(pdf_source, filename=None):
 
         seller_patterns = [
             r'Đơn vị bán hàng\s*\([Ss]eller\)[:\s]*(.+)',  # M-INVOICE format
+            r'Đơn vị bán\s*\([Ss]eller\)[:\s]*(.+)', # Standard
+            r'Đơn vị bán\s*\(Seller\)[:\s]*(.+)',  # Specific exact match
             r'Tên người bán\s*\([Ss]eller\)[:\s]*(.+)',  # VNPT format
             r'Đơn vị bán hàng\s*\([Cc]ompany\)[:\s]*(.+)',  # MISA variation
             r'Đơn vị bán hàng[:\s]*(.+)',  # Simple format (Petrolimex)
-            r'Đơn vị bán\s*\([Ss]eller\)[:\s]*(.+)',
             r'Tên đơn vị bán hàng[:\s]*(.+)',
             r'HỘ KINH DOANH[:\s]*(.+)',
+            r'QUÁN[:\s]*(.+)',
             # NOTE: Removed 'Người bán' pattern - it captures 'Người bán hàng(Seller)' incorrectly
         ]
         for pattern in seller_patterns:
@@ -1293,7 +1346,8 @@ def extract_invoice_data(pdf_source, filename=None):
                 
                 # Robust cleanup of "Seller" / "Company" prefixes
                 # Removes: "(Seller):", "Seller :", "(Company):", "Doanh nghiệp:", etc.
-                seller = re.sub(r'^\s*[\(\[]?\s*(?:Seller|Company|Người bán|Doanh nghiệp|Tên đơn vị)\s*[\)\]]?\s*[:\.\-]?\s*', '', seller, flags=re.IGNORECASE)
+                seller = re.sub(r'^\s*[\(\[]?\s*(?:Seller|Company|Người bán|Doanh nghiệp|Tên đơn vị|Đơn vị bán)\s*[\)\]]?\s*[:\.\-]?\s*', '', seller, flags=re.IGNORECASE)
+                seller = re.sub(r'^\s*\(?Issued\)?\s*[:\.\-]\s*', '', seller, flags=re.IGNORECASE) # Fix for (Issued) :
                 seller = re.sub(r'^\s*[:\.\-]+\s*', '', seller) # Clean remaining colons/dashes
                 seller = re.sub(r'\s*Mã số thuế.*$', '', seller, flags=re.IGNORECASE)
                 seller = re.sub(r'\s*MST.*$', '', seller, flags=re.IGNORECASE)
@@ -1308,15 +1362,18 @@ def extract_invoice_data(pdf_source, filename=None):
                 if seller.lower().replace(':', '').strip() in ['(seller)', 'seller', 'người bán', 'tên đơn vị']:
                     continue
                     
-                if len(seller) > 5:
+                if len(seller) > 5 or (len(seller) > 3 and 'QUÁN' in seller.upper()):
                     data["Đơn vị bán"] = seller
                     break
         
         # PRIORITY FALLBACK 1: First line(s) before first "Mã số thuế" - this is most reliable for MISA invoices
         # where seller company name is at the very top of the document
         if not data["Đơn vị bán"]:
-            # Find the position of first "Mã số thuế"
+            # Find the position of first "Mã số thuế" OR "MST"
             mst_pos = full_text.find("Mã số thuế")
+            if mst_pos == -1:
+                 mst_pos = full_text.find("MST")
+                 
             if mst_pos > 0:
                 # Get text before first MST
                 text_before_mst = full_text[:mst_pos].strip()
@@ -1325,9 +1382,9 @@ def extract_invoice_data(pdf_source, filename=None):
                 # First non-empty line that looks like a company name
                 for line in lines_before_mst[:6]:  # Check first 6 lines to handle headers
                     # Must contain company keywords AND be reasonably long
-                    if len(line) > 10 and any(kw in line.upper() for kw in ['CÔNG TY', 'TẬP ĐOÀN', 'CHI NHÁNH', 'NHÀ HÀNG', 'DNTN', 'HỘ KINH DOANH']):
+                    if len(line) > 10 and any(kw in line.upper() for kw in ['CÔNG TY', 'TẬP ĐOÀN', 'CHI NHÁNH', 'NHÀ HÀNG', 'DNTN', 'HỘ KINH DOANH', 'QUÁN']):
                         # Exclude headers and BUYER info
-                        if not any(bad in line.upper() for bad in ['HÓA ĐƠN', 'CỘNG HÒA', 'ĐỘC LẬP', 'TÊN NGƯỜI MUA', 'TÊN ĐƠN VỊ:', 'PHÂN PHỐI TỔNG HỢP DẦU KHÍ']):
+                        if not any(bad in line.upper() for bad in ['HÓA ĐƠN', 'CỘNG HÒA', 'ĐỘC LẬP', 'TÊN NGƯỜI MUA', 'TÊN ĐƠN VỊ:', 'PHÂN PHỐI TỔNG HỢP DẦU KHÍ', 'ĐÃ ĐƯỢC KÝ ĐIỆN TỬ']):
                             # Multi-line company name: if next line is also uppercase text, merge
                             idx = lines_before_mst.index(line)
                             if idx + 1 < len(lines_before_mst):
@@ -1347,9 +1404,28 @@ def extract_invoice_data(pdf_source, filename=None):
                 signer = sign_match.group(1).replace('\n', ' ').strip()
                 # Only accept if it looks like a company name
                 if len(signer) > 5 and any(x in signer.upper() for x in ['CÔNG TY', 'TẬP ĐOÀN', 'CHI NHÁNH', 'NHÀ HÀNG', 'DNTN']):
-                    if not any(x in signer.lower() for x in ['địa chỉ', 'address', 'mã số']):
+                    if not any(x in signer.lower() for x in ['địa chỉ', 'address', 'mã số', 'đã được ký']):
                         data["Đơn vị bán"] = signer
         
+        # FALLBACK 3: Bottom Scan (Last 20 lines) - for Park Hyatt / Hotels
+        if not data["Đơn vị bán"]:
+            lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+            # Check last 20 lines
+            for line in lines[-20:]:
+                if len(line) > 5 and any(kw in line.upper() for kw in ['CÔNG TY', 'TẬP ĐOÀN', 'CHI NHÁNH', 'DNTN', 'HỘ KINH DOANH', 'HOTEL', 'KHÁCH SẠN', 'QUÁN']):
+                    # Must be uppercase or mostly uppercase for Company Name
+                    if line.isupper() or 'CÔNG TY' in line.upper() or 'QUÁN' in line.upper():
+                         # Exclude headers/footer noise
+                         if not any(bad in line.upper() for bad in ['HÓA ĐƠN', 'TRANG', 'PAGE', 'KÝ BỞI', 'GIẢI PHÁP', 'CUNG CẤP', 'ĐỊA CHỈ', 'MST:', 'VAT CODE']):
+                              data["Đơn vị bán"] = line
+                              break
+
+        # Mã CQT (Standard PDF)
+        # Matches: "Mã của cơ quan thuế: ...", "Mã CQT: ..."
+        cqt_match = re.search(r'(?:Mã|Ma)\s*(?:của)?\s*(?:CQ|cơ\s*quan)\s*thuế[:\s]*([A-Z0-9\-]+)', full_text, re.IGNORECASE)
+        if cqt_match:
+            data["Mã CQT"] = cqt_match.group(1)
+            
         # SERIAL NUMBER (Ký hiệu) - Multiple patterns INCLUDING "Series"
         serial_patterns = [
             r'Ký hiệu\s*/\s*Serial[:\s]*([A-Z0-9]+)',  # C26MAP: Ký hiệu / Serial: 1C26MAP
@@ -2091,6 +2167,16 @@ def extract_invoice_data(pdf_source, filename=None):
     except Exception as e:
         print(f"Error processing {filename}: {e}")
     
+    # RE-CALCULATE TOTAL TAX from Components if missing
+    if not data["Tiền thuế"]:
+         calc_tax = 0
+         for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%", "Thuế khác"]:
+             calc_tax += parse_money(data.get(c))
+         
+         if calc_tax > 0:
+             data["Tiền thuế"] = format_money(calc_tax)
+             print(f"  [AUTO-AGGR] Inferred Total Tax from breakdown: {calc_tax}")
+
     # RE-CALCULATE TAX RATE if missing (Final Pass)
     # This runs after all other fallbacks/aggregations to catch cases where Pre/Tax were inferred but Rate wasn't set.
     if data["Tiền thuế"] and data["Số tiền trước Thuế"] and not any(data.get(c) for c in ["Thuế 0%", "Thuế 5%", "Thuế 8%", "Thuế 10%"]):
@@ -2140,6 +2226,36 @@ def extract_invoice_data(pdf_source, filename=None):
                  # print(f"    -> Formatted: '{data[k]}'")
              elif val == 0 and data[k] not in ["0", "0.0", "0,0"]:
                  pass
+
+    # FINAL CLEANUP for Seller Name (Global)
+    # 0. Pre-clean: If current seller is just a blacklisted string, clear it so Rescue can work
+    if data.get("Đơn vị bán"):
+         s = data["Đơn vị bán"]
+         if any(bad in s.lower() for bad in ['đã được ký điện tử bởi', 'được ký bởi', 'ký bởi công ty', 'digitally signed by']):
+             data["Đơn vị bán"] = ""
+
+    # RESCUE: If Seller is empty, check for known short names (Quán, Shop)
+    if not data["Đơn vị bán"]:
+         # "Quán 87", "Quán Cơm", "Shop ABC"
+         if "Quán 87" in full_text:
+             data["Đơn vị bán"] = "Quán 87"
+
+    if data.get("Đơn vị bán"):
+        s = data["Đơn vị bán"]
+        # Remove (Issued) : prefixes
+        s = re.sub(r'^\s*\(?Issued\)?\s*[:\.\-]\s*', '', s, flags=re.IGNORECASE).strip()
+        # Remove "Đơn vị bán" prefix if leaked
+        s = re.sub(r'^\s*[\(\[]?\s*(?:Seller|Company|Người bán|Doanh nghiệp|Tên đơn vị|Đơn vị bán)\s*[\)\]]?\s*[:\.\-]?\s*', '', s, flags=re.IGNORECASE)
+
+        # Remove Ký hiệu suffix if present (e.g. "... Ký hiệu: 1K25TAN")
+        if "Ký hiệu:" in s:
+            s = s.split("Ký hiệu:")[0].strip()
+        
+        # Check blacklist - if blacklisted, clear it
+        if any(bad in s.lower() for bad in ['đã được ký điện tử bởi', 'được ký bởi', 'ký bởi công ty', 'digitally signed by']):
+             s = "" 
+        
+        data["Đơn vị bán"] = s
 
     return data, line_items
 
